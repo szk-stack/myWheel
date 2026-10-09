@@ -43,6 +43,43 @@ def chat(messages):
     return ctx["reply"]
 
 
+def chat_stream(messages):
+    """流式版对话流程（生成器）：边收边把文字段交给调用方。
+
+    ★ 一个要理解的架构取舍：
+      流式输出时，每个字都已经实时"泼"到用户屏幕上了，
+      after_llm 插件再也没法修改已经显示出来的内容。
+      我们的处理是：
+        - 分段照常流出去（用户要的打字机效果）
+        - 流结束后，把完整回答交给 after_llm 跑一遍——
+          供"记录、统计、日志"类插件使用（它们的修改不会再影响用户）。
+      将来若要做"实时过滤"（如敏感词逐字打码），需要在每个分段上做，
+      那是以后加一个 on_chunk 空槽的课题。
+    """
+    ctx = {
+        "messages": messages,
+        "reply": None,
+        "meta": {},
+    }
+
+    # ① 调模型之前：before_llm 插件照常工作（可以改 messages）
+    hooks.run(hooks.before_llm, ctx)
+
+    # ② 流式调用模型：收到一段就转交给调用方（server 会立刻发给浏览器）
+    pieces = []
+    for piece in llm.chat_stream(ctx["messages"]):
+        pieces.append(piece)
+        yield piece
+
+    # ③ 流结束后：拼出完整回答，交给 after_llm（只用于记录类用途）
+    ctx["reply"] = "".join(pieces)
+    try:
+        hooks.run(hooks.after_llm, ctx)
+    except Exception as e:
+        # after_llm 插件出错不影响已经发出的内容，打个警告就好
+        print(f"[警告] after_llm 插件出错：{e}")
+
+
 def load_plugins():
     """自动加载 plugins/ 文件夹里的所有插件。
 

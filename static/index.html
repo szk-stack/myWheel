@@ -244,6 +244,7 @@ const state = {
 
 let sending = false;     // 正在等 AI 回复吗？
 let errorText = "";      // 有错误就存在这里，渲染时显示出来
+let thinkingEl = null;   // "思考中…"那个气泡元素（流式回答就"长"在它身上）
 
 // ---------- 先把页面上的元素抓在手里，后面反复要用 ----------
 const convListEl = document.getElementById("convList");
@@ -412,51 +413,86 @@ async function sendMessage() {
   input.value = "";
   errorText = "";
 
-  // 2. 进入"发送中"状态，并重新渲染（页面会自动显示"思考中…"）
+  // 2. 进入"发送中"状态，并重新渲染（页面会显示"思考中…"气泡）
   sending = true;
   renderAll();
 
+  // ★ 拿到"思考中…"气泡的引用：接下来流式收到的每一段文字，
+  //   直接写在它身上（不做整页重绘——不然每来一个字就重建
+  //   整个界面，会非常卡。这是"性能约束打破纯状态驱动"的一课）
+  const bubble = thinkingEl;
+  let fullReply = "";    // 攒起来的完整回答
+
   try {
-    // 3. 调后端聊天接口
-    //    ★ 注意：发的是这个会话的【完整历史】——这个核心设计一直不变
-    const res = await fetch("/api/chat", {
+    // 3. 调后端的【流式】聊天接口
+    //    （发的仍然是这个会话的完整历史——核心设计一直不变）
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: conv.messages }),
     });
-    const data = await res.json();
-
-    if (data.error) {
-      // 后端说不行（比如还没填 API Key）
-      errorText = data.error;
-      conv.messages.pop();   // 这句话没被回答，从内存里拿掉
-    } else {
-      // 成功！把 AI 的回答放进内存
-      conv.messages.push({ role: "assistant", content: data.reply });
-
-      // 4. ★ 成功了才"记账"：把这一轮对话写成事件，一次性批量追加
-      const events = [
-        { type: "message", conversation_id: conv.id, role: "user", content: text },
-        { type: "message", conversation_id: conv.id, role: "assistant", content: data.reply },
-      ];
-
-      // 如果这还是第一轮对话，顺便把自动起的标题也记一笔
-      // （提示：真实系统会"先记账再调模型"，用恢复机制处理失败；
-      //   我们简化成"成功才记账"，逻辑更容易理解）
-      if (conv.title === "新对话") {
-        conv.title = text.slice(0, 12);   // 只取前 12 个字
-        events.push({ type: "rename", id: conv.id, title: conv.title });
-      }
-
-      await appendEvents(events);   // 一批事件一次发送（批量追加）
+    if (!res.ok || !res.body) {
+      throw new Error("服务未就绪（HTTP " + res.status + "），请重启 server.py 后再试");
     }
+
+    // 4. ★ 流式读取：response.body 是一个"可以一段段读的数据流"
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";   // 缓冲区：兜住"还没凑齐一整行"的碎数据
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;                          // 服务端发完了
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // 按行切开来处理；最后一段可能是"半行"，留在缓冲区等下一块拼上
+      // （这是流式解析最容易错的地方：网络块的边界不等于行的边界）
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6);
+        if (payload === "[DONE]") continue;     // 结束标记
+
+        const msg = JSON.parse(payload);
+        if (msg.error) throw new Error(msg.error);   // 服务端报的错
+
+        if (msg.text) {
+          fullReply += msg.text;
+          bubble.textContent = fullReply;            // ★ 打字机效果：逐段更新
+          chatBox.scrollTop = chatBox.scrollHeight;  // 跟着滚到底
+        }
+      }
+    }
+
+    // 5. 流正常结束 → 把完整回答记进内存
+    conv.messages.push({ role: "assistant", content: fullReply });
+
+    // 6. 记账：这一轮对话写成事件，一次性批量追加（和之前的规矩一样）
+    const events = [
+      { type: "message", conversation_id: conv.id, role: "user", content: text },
+      { type: "message", conversation_id: conv.id, role: "assistant", content: fullReply },
+    ];
+    if (conv.title === "新对话") {
+      conv.title = text.slice(0, 12);   // 取前 12 个字当标题
+      events.push({ type: "rename", id: conv.id, title: conv.title });
+    }
+    await appendEvents(events);
+
   } catch (err) {
-    // 连不上后端（比如忘了运行 python server.py）
-    errorText = "连不上后端服务，请确认 server.py 正在运行。";
+    // 出错（没填 Key、网络断开、回答中途被打断……）：
+    // 简化处理：该轮不记账，从内存里拿掉这句提问，显示错误提示。
+    // （如果已经流出了一部分文字，会被下一次重绘一起清掉）
+    errorText = (err instanceof TypeError)
+      ? "连不上后端服务，请确认 server.py 正在运行。"
+      : (err.message || "连接出错");
     conv.messages.pop();
   }
 
-  // 5. 收尾：退出发送状态，重新渲染
+  // 7. 收尾：退出发送状态，重新渲染
+  //    （这时"流式气泡"会被正式渲染的消息气泡替换，视觉上无缝衔接）
   sending = false;
   renderAll();
   input.focus();
@@ -537,9 +573,10 @@ function renderMessages() {
     addBubble("ai", "你好！我是你的第一个 Agent。现在数据用「事件日志」来记（跟 Pi 学的），聊两句试试～");
   }
 
-  // 正在等回复 → 显示"思考中…"
+  // 正在等回复 → 显示"思考中…"（把元素引用记下来，流式回答会直接改它的文字）
+  thinkingEl = null;
   if (sending) {
-    addBubble("ai", "思考中…");
+    thinkingEl = addBubble("ai", "思考中…");
   }
 
   // 有错误 → 用红色气泡显示

@@ -8,8 +8,9 @@ server.py —— 启动入口（用这个文件启动整个项目）
   1. 把网页发给浏览器              （GET  /）
   2. 读取对话状态                  （GET  /api/state）   → storage 回放事件日志推导出来
   3. 处理前端发来的请求：
-     - 聊天                        （POST /api/chat）    → 交给 engine 处理
-     - 追加事件                    （POST /api/events）  → storage 往日志末尾写（只追加，不重写）
+     - 聊天（普通）                （POST /api/chat）         → 交给 engine 处理
+     - 聊天（流式）                （POST /api/chat/stream）  → 边收边发，打字机效果
+     - 追加事件                    （POST /api/events）       → storage 往日志末尾写（只追加，不重写）
 """
 
 import json
@@ -26,6 +27,10 @@ ROOT = Path(__file__).resolve().parent
 
 class ChatHandler(BaseHTTPRequestHandler):
     """HTTP 请求处理器：定义"收到什么请求，回什么内容"。"""
+
+    # 用 HTTP/1.1（默认是 1.0）。流式接口需要它——这样才能"边生成边发送"，
+    # 而不是等整个回答都准备好了才一次性发出去。
+    protocol_version = "HTTP/1.1"
 
     def do_GET(self):
         """浏览器"读取"时走这里。"""
@@ -63,6 +68,10 @@ class ChatHandler(BaseHTTPRequestHandler):
                 # 出任何错（比如还没填 Key），都把错误信息发回前端显示
                 self._send_json(500, {"error": str(e)})
 
+        elif self.path == "/api/chat/stream":
+            # ---- 流式聊天接口：边收边发（打字机效果）----
+            self._handle_chat_stream(data)
+
         elif self.path == "/api/events":
             # ---- 事件接口：把前端发来的一批事件追加到日志末尾 ----
             try:
@@ -73,6 +82,59 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         else:
             self.send_error(404, "Not Found")
+
+    # ---------- 流式聊天的三个小工具（打字机效果） ----------
+
+    def _handle_chat_stream(self, data):
+        """处理流式聊天请求：引擎每吐出一段文字，就立刻发给浏览器。
+
+        技术上这叫 SSE（Server-Sent Events）：响应不设置总长度，
+        而是一个数据块一个数据块地"挤"出去，浏览器边收边显示。
+        """
+        try:
+            self._start_sse()
+            # 边收边发：engine.chat_stream 是生成器，for 循环取一段发一段
+            for piece in engine.chat_stream(data.get("messages", [])):
+                self._send_sse({"text": piece})
+            self._end_sse()
+        except Exception as e:
+            # 出错了（比如还没填 Key、网络断了）：
+            # 此时响应头已经发出去了，只能把错误也包成一条流消息发回去，
+            # 前端收到后会把它显示出来。
+            try:
+                self._send_sse({"error": str(e)})
+                self._end_sse()
+            except Exception:
+                pass
+
+    def _start_sse(self):
+        """发送流式响应的开头（响应头）。"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        # 手动使用"分块传输"（chunked）：回答总长度未知，
+        # 只能发一块算一块。这是 HTTP/1.1 支持流式响应的基础。
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+
+    def _send_sse(self, obj):
+        """把一个字典作为一条 SSE 消息发出去。
+
+        消息的文本格式是：  data: <内容> 加两个换行（这是 SSE 的规定）。
+        内容用 JSON 包一层——这样就算文字里带换行也不会发乱。
+        """
+        payload = "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+        data = payload.encode("utf-8")
+        # 手动分块编码：先写"这一块有多少字节（十六进制）"，再写内容
+        self.wfile.write(f"{len(data):X}\r\n".encode("utf-8") + data + b"\r\n")
+        self.wfile.flush()   # ★ 立即推出去，不许攒在缓冲区
+
+    def _end_sse(self):
+        """发送结束标记 [DONE]，并结束整个分块响应。"""
+        done = "data: [DONE]\n\n".encode("utf-8")
+        self.wfile.write(f"{len(done):X}\r\n".encode("utf-8") + done + b"\r\n")
+        self.wfile.write(b"0\r\n\r\n")   # 分块编码的结束标记：长度为 0 的块
+        self.wfile.flush()
 
     # ---------- 下面两个是给上面用的小工具函数 ----------
 
