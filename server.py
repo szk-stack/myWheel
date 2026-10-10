@@ -20,6 +20,7 @@ from pathlib import Path
 import config
 import engine
 import storage
+import toolbox
 
 # 项目根目录（就是本文件所在的位置）
 ROOT = Path(__file__).resolve().parent
@@ -93,9 +94,11 @@ class ChatHandler(BaseHTTPRequestHandler):
         """
         try:
             self._start_sse()
-            # 边收边发：engine.chat_stream 是生成器，for 循环取一段发一段
-            for piece in engine.chat_stream(data.get("messages", [])):
-                self._send_sse({"text": piece})
+            # 边收边发：engine.chat_stream 是生成器，它吐出的本来就是
+            # "事件字典"（文字增量 / 工具调用 / 工具结果），原样转发给浏览器，
+            # 前端按里面的 type 字段分别处理
+            for event in engine.chat_stream(data.get("messages", [])):
+                self._send_sse(event)
             self._end_sse()
         except Exception as e:
             # 出错了（比如还没填 Key、网络断了）：
@@ -161,6 +164,9 @@ class ChatHandler(BaseHTTPRequestHandler):
 def main():
     # ① 先加载所有插件（把插件函数挂到空槽上）
     engine.load_plugins()
+
+    # ② 加载所有工具（把 tools/ 里的工具登记进工具箱）
+    toolbox.load_tools()
 
     # ② 启动 HTTP 服务
     #    绑定 127.0.0.1 表示"只有本机能访问"，安全，而且不会弹防火墙提示

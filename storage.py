@@ -92,6 +92,20 @@ def load_state():
                     "content": event["content"],
                 })
 
+        elif etype == "tool":
+            # 工具调用记录：作为一条 role=tool 的条目放进消息时间线。
+            # 前端把它渲染成灰色小卡片（可回溯"agent 当时干了什么"）；
+            # 发给模型前会被过滤掉——它纯粹是"给人看的账本"。
+            conv = _find(conversations, event.get("conversation_id"))
+            if conv is not None:
+                conv["messages"].append({
+                    "role": "tool",
+                    "name": event.get("name"),
+                    "arguments": event.get("arguments"),
+                    "result": event.get("result"),
+                    "ok": event.get("ok", True),
+                })
+
         elif etype == "rename":
             # 会话改名
             conv = _find(conversations, event.get("id"))

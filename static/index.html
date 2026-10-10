@@ -155,6 +155,47 @@
     color: #4a7cff;
     background: #f4f7ff;
   }
+
+  /* ===== 工具调用相关（这次新加的） ===== */
+
+  /* 流式过程中的临时状态行："正在调用 xxx…" */
+  .tool-line {
+    align-self: flex-start;
+    font-size: 12px;
+    color: #999;
+    padding: 0 4px;
+  }
+
+  /* 正式的工具记录卡片（进入消息时间线，刷新后还在） */
+  .tool-card {
+    align-self: flex-start;
+    max-width: 90%;
+    font-size: 12px;
+    color: #666;
+    background: #f7f8fa;
+    border: 1px solid #e4e7ee;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .tool-card-head {
+    padding: 6px 10px;
+    cursor: pointer;              /* 提示可以点击 */
+    user-select: none;            /* 点击时别把文字选中 */
+  }
+  .tool-card-head:hover { background: #eef1f6; }
+  .tool-card-body {
+    display: none;                /* 默认折叠，点击才展开 */
+    padding: 8px 10px;
+    border-top: 1px solid #e4e7ee;
+    background: #fff;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 240px;
+    overflow-y: auto;
+    font-family: Consolas, "Courier New", monospace;
+  }
+  .tool-card.open .tool-card-body { display: block; }
+  .tool-card.fail .tool-card-head { color: #c0392b; }
   .msg.error {                 /* 出错提示：浅红色气泡 */
     background: #fff5f5;
     border-color: #ffd9d9;
@@ -227,6 +268,7 @@
 //   session —— 新建了一个会话      { type:"session", id, title }
 //              （分支出来的会话会多带 branched_from / branched_at 血缘备注）
 //   message —— 新的一条消息        { type:"message", conversation_id, role, content }
+//   tool    —— 一次工具调用记录    { type:"tool", conversation_id, name, arguments, result, ok }
 //   rename  —— 会话改名            { type:"rename", id, title }
 //   delete  —— 删除会话            { type:"delete", id }
 //   switch  —— 切换当前会话        { type:"switch", id }
@@ -367,13 +409,13 @@ async function branchConversation(sourceId, index) {
     id: "c" + Date.now(),
     title: source.title + "·分支",
     messages: copied.map(function (m) {
-      return { role: m.role, content: m.content };
+      return Object.assign({}, m);   // 浅拷贝一条新对象（tool 条目的字段也原样带上）
     }),
   };
   state.conversations.unshift(newConv);
   state.current_id = newConv.id;
 
-  // 记账：1 条 session（带"从哪儿来"的血缘标记）+ 复印的所有 message
+  // 记账：1 条 session（带"从哪儿来"的血缘标记）+ 复印的所有条目
   // （branched_from / branched_at 只是备注，回放时会被忽略——旧代码天然兼容）
   const events = [
     {
@@ -385,12 +427,24 @@ async function branchConversation(sourceId, index) {
     },
   ];
   copied.forEach(function (m) {
-    events.push({
-      type: "message",
-      conversation_id: newConv.id,
-      role: m.role,
-      content: m.content,
-    });
+    if (m.role === "tool") {
+      // 工具记录也照原样复印一份
+      events.push({
+        type: "tool",
+        conversation_id: newConv.id,
+        name: m.name,
+        arguments: m.arguments,
+        result: m.result,
+        ok: m.ok,
+      });
+    } else {
+      events.push({
+        type: "message",
+        conversation_id: newConv.id,
+        role: m.role,
+        content: m.content,
+      });
+    }
   });
 
   await appendEvents(events);
@@ -417,64 +471,113 @@ async function sendMessage() {
   sending = true;
   renderAll();
 
-  // ★ 拿到"思考中…"气泡的引用：接下来流式收到的每一段文字，
-  //   直接写在它身上（不做整页重绘——不然每来一个字就重建
-  //   整个界面，会非常卡。这是"性能约束打破纯状态驱动"的一课）
+  // ★ 拿到"思考中…"气泡的引用：流式收到的每一段文字直接写在它身上
+  //   （不做整页重绘——不然每来一个字就重建整个界面，会非常卡）
   const bubble = thinkingEl;
-  let fullReply = "";    // 攒起来的完整回答
+  let fullReply = "";      // 攒起来的完整回答
+  const roundTools = [];   // 本轮用过的工具记录（流结束后要记账）
+  const toolLines = [];    // 流式过程中"正在调用…"的临时状态行元素
 
   try {
-    // 3. 调后端的【流式】聊天接口
-    //    （发的仍然是这个会话的完整历史——核心设计一直不变）
+    // 3. 调后端的流式聊天接口
+    //    ★ 注意过滤：工具记录（role=tool）只是"给人看的账本"，
+    //      发给模型时要去掉——模型的上下文里只有人话
+    const historyForModel = conv.messages.filter(function (m) {
+      return m.role !== "tool";
+    });
     const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: conv.messages }),
+      body: JSON.stringify({ messages: historyForModel }),
     });
     if (!res.ok || !res.body) {
       throw new Error("服务未就绪（HTTP " + res.status + "），请重启 server.py 后再试");
     }
 
-    // 4. ★ 流式读取：response.body 是一个"可以一段段读的数据流"
+    // 4. 流式读取（和上一版一样：逐块读 + 缓冲区兜住"半行"）
     const reader = res.body.getReader();
     const decoder = new TextDecoder("utf-8");
-    let buffer = "";   // 缓冲区：兜住"还没凑齐一整行"的碎数据
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;                          // 服务端发完了
+      if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-
-      // 按行切开来处理；最后一段可能是"半行"，留在缓冲区等下一块拼上
-      // （这是流式解析最容易错的地方：网络块的边界不等于行的边界）
       const lines = buffer.split("\n");
       buffer = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         const payload = line.slice(6);
-        if (payload === "[DONE]") continue;     // 结束标记
+        if (payload === "[DONE]") continue;
 
         const msg = JSON.parse(payload);
-        if (msg.error) throw new Error(msg.error);   // 服务端报的错
+        if (msg.error) throw new Error(msg.error);
 
-        if (msg.text) {
+        if (msg.type === "text") {
+          // 一段回答文字 → 打字机效果
           fullReply += msg.text;
-          bubble.textContent = fullReply;            // ★ 打字机效果：逐段更新
-          chatBox.scrollTop = chatBox.scrollHeight;  // 跟着滚到底
+          bubble.textContent = fullReply;
+          chatBox.scrollTop = chatBox.scrollHeight;
+
+        } else if (msg.type === "tool_call") {
+          // 模型要调工具了 → 在回答气泡上方加一行临时状态
+          const lineEl = document.createElement("div");
+          lineEl.className = "tool-line";
+          lineEl.textContent = "正在调用工具 " + msg.name + " …";
+          chatBox.insertBefore(lineEl, bubble.parentElement);
+          toolLines.push(lineEl);
+          chatBox.scrollTop = chatBox.scrollHeight;
+
+        } else if (msg.type === "tool_result") {
+          // 工具执行完了 → 更新那一行状态，并记录下来（结束后要记账）
+          const lineEl = toolLines.shift();
+          if (lineEl) {
+            lineEl.textContent = "工具 " + msg.name + (msg.ok ? " 执行完成" : " 执行失败");
+          }
+          roundTools.push({
+            name: msg.name,
+            arguments: msg.arguments,
+            result: msg.result,
+            ok: msg.ok,
+          });
+          chatBox.scrollTop = chatBox.scrollHeight;
         }
       }
     }
 
-    // 5. 流正常结束 → 把完整回答记进内存
+    // 5. 流正常结束 → 把工具记录和最终回答记进内存
+    //    顺序就是实际发生顺序：…… → 工具们 → AI 的回答
+    roundTools.forEach(function (t) {
+      conv.messages.push({
+        role: "tool",
+        name: t.name,
+        arguments: t.arguments,
+        result: t.result,
+        ok: t.ok,
+      });
+    });
     conv.messages.push({ role: "assistant", content: fullReply });
 
-    // 6. 记账：这一轮对话写成事件，一次性批量追加（和之前的规矩一样）
+    // 6. 记账：把这一轮发生的事写成事件，一次性批量追加
+    //    （user → tool…… → assistant；工具记录也进日志，方便回溯）
     const events = [
       { type: "message", conversation_id: conv.id, role: "user", content: text },
-      { type: "message", conversation_id: conv.id, role: "assistant", content: fullReply },
     ];
+    roundTools.forEach(function (t) {
+      events.push({
+        type: "tool",
+        conversation_id: conv.id,
+        name: t.name,
+        arguments: t.arguments,
+        result: t.result,
+        ok: t.ok,
+      });
+    });
+    events.push({
+      type: "message", conversation_id: conv.id, role: "assistant", content: fullReply,
+    });
     if (conv.title === "新对话") {
       conv.title = text.slice(0, 12);   // 取前 12 个字当标题
       events.push({ type: "rename", id: conv.id, title: conv.title });
@@ -484,7 +587,7 @@ async function sendMessage() {
   } catch (err) {
     // 出错（没填 Key、网络断开、回答中途被打断……）：
     // 简化处理：该轮不记账，从内存里拿掉这句提问，显示错误提示。
-    // （如果已经流出了一部分文字，会被下一次重绘一起清掉）
+    // （已经流出的半截内容、工具临时行，会被下一次重绘一起清掉）
     errorText = (err instanceof TypeError)
       ? "连不上后端服务，请确认 server.py 正在运行。"
       : (err.message || "连接出错");
@@ -492,7 +595,7 @@ async function sendMessage() {
   }
 
   // 7. 收尾：退出发送状态，重新渲染
-  //    （这时"流式气泡"会被正式渲染的消息气泡替换，视觉上无缝衔接）
+  //    （这时工具记录会变成正式的小卡片、回答气泡会被正式渲染替换）
   sending = false;
   renderAll();
   input.focus();
@@ -556,10 +659,13 @@ function renderMessages() {
 
   chatBox.innerHTML = "";       // 同样先清空
 
-  // 把会话里的每条消息画成气泡
+  // 把会话里的每条消息画成气泡（或工具卡片）
   if (conv) {
     conv.messages.forEach(function (msg, index) {
-      if (msg.role === "assistant") {
+      if (msg.role === "tool") {
+        // 工具记录：渲染成灰色小卡片（点击可展开看完整结果）
+        addToolCard(msg);
+      } else if (msg.role === "assistant") {
         // AI 的回复：附上"坐标"（哪个会话、第几条），悬浮按钮点它时才知道分支哪里
         addBubble("ai", msg.content, { convId: conv.id, index: index });
       } else {
@@ -615,6 +721,37 @@ function addBubble(role, text, branchInfo) {
   chatBox.appendChild(wrap);
   chatBox.scrollTop = chatBox.scrollHeight;    // 自动滚动到最新消息
   return div;   // 返回气泡本身（"思考中…"改红色错误样式时要用它）
+}
+
+// ---------- 把一条"工具记录"做成灰色小卡片 ----------
+// 点击卡片头部可以展开/收起完整结果
+// （"默认折叠、想看了再展开"这个交互学自 Pi 的 Ctrl+O）
+function addToolCard(tool) {
+  const card = document.createElement("div");
+  card.className = "tool-card" + (tool.ok ? "" : " fail");
+
+  // 头部：一行摘要
+  const head = document.createElement("div");
+  head.className = "tool-card-head";
+  const argsText = JSON.stringify(tool.arguments);   // 参数变成一小串文字
+  head.textContent = "工具 " + tool.name + "(" +
+    (argsText.length > 60 ? argsText.slice(0, 60) + "…" : argsText) +
+    ") —— " + (tool.ok ? "成功（点击展开）" : "失败（点击展开）");
+
+  // 身体：完整结果（默认折叠）
+  const body = document.createElement("div");
+  body.className = "tool-card-body";
+  body.textContent = tool.result || "";
+
+  // 点头部切换展开/收起
+  head.addEventListener("click", function () {
+    card.classList.toggle("open");
+  });
+
+  card.appendChild(head);
+  card.appendChild(body);
+  chatBox.appendChild(card);
+  chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 // ============================================================

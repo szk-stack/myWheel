@@ -2,7 +2,9 @@
 llm.py —— 负责和 DeepSeek 服务器说话
 
 只用 Python 自带的工具（标准库），不用安装任何东西。
-它的工作：把完整对话历史发过去，把 AI 的回答拿回来。
+两个出口：
+  chat()        —— 普通版：等模型把话说完，一口气返回
+  chat_stream() —— 流式版：模型边生成我们边收；而且这次支持"工具调用"了
 """
 
 import json
@@ -62,35 +64,38 @@ def chat(messages):
         raise RuntimeError(f"连不上 API 服务器，请检查网络：{e.reason}") from e
 
 
-def chat_stream(messages):
-    """把消息发给模型，流式返回回答（生成器：一段一段"吐"出来）。
+def chat_stream(messages, tools=None):
+    """流式请求模型，产出两类"事件"（生成器）。
 
-    ★ 这是"打字机效果"的源头。
-    和上面的 chat() 有什么区别？
-      - chat() 要等模型把整段话生成完，一口气返回；
-      - chat_stream() 是模型边生成、我们边收，收到一小段就 yield 出去，
-        调用方（server.py）就能立刻转发给浏览器，一个字一个字显示。
+    产出的事件（都是字典，方便上层按 type 分发）：
+      {"type": "text", "text": "一小段文字"}      —— 回答的文字增量，来一段吐一段
+      {"type": "tool_calls", "tool_calls": [...]} —— 模型要求调用工具（流结束时才产出）
 
-    Python 里带 yield 的函数叫"生成器函数"：调用它不会立刻执行，
-    而是返回一个"可以逐个取值的东西"，用 for 循环取一次才走一步。
+    参数：
+      messages —— 对话历史
+      tools    —— 工具"说明书"列表（发给模型看的；None 或空表示不带工具）
+
+    ★ 工具调用在流式下是"分片"到达的：
+      工具名、参数字符串会被切成好几块、分好几批发过来，
+      所以要按序号攒进 pending_calls、拼接完整才能用——
+      这是本函数最需要动脑子的几行。
     """
+
     # 1. 检查有没有填 Key（和 chat() 一样的提示）
     if not config.API_KEY:
         raise RuntimeError(
             "还没有填 API Key！请打开 config.py，把 API_KEY 填进引号里，然后重启服务。"
         )
 
-    # 2. 请求体里多了 "stream": True
-    #    官方文档原话：partial message deltas will be sent
-    #    （会一段段地发送增量文本，最后以 data: [DONE] 结束）
-    body = json.dumps(
-        {
-            "model": config.MODEL,
-            "messages": messages,
-            "stream": True,        # ★ 就靠这一行开启流式
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
+    # 2. 拼请求体：这次多了 "stream"，还可以带上 "tools"
+    body_dict = {
+        "model": config.MODEL,
+        "messages": messages,
+        "stream": True,        # ★ 开启流式（打字机效果的源头）
+    }
+    if tools:
+        body_dict["tools"] = tools   # ★ 带上工具说明书，模型才知道自己能用什么工具
+    body = json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
 
     request = urllib.request.Request(
         config.API_URL,
@@ -102,9 +107,11 @@ def chat_stream(messages):
         method="POST",
     )
 
-    # 3. 一行一行地接收 SSE 流（Server-Sent Events 格式）
+    # 3. 一行一行地接收 SSE 流
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
+            pending_calls = {}   # 工具调用"拼接区"：序号 -> {"id", "name", "arguments"}
+
             while True:
                 raw_line = response.readline()
                 if not raw_line:
@@ -121,11 +128,32 @@ def chat_stream(messages):
                     break    # ★ 官方规定的结束标记
 
                 chunk = json.loads(payload)
-                piece = chunk["choices"][0]["delta"].get("content")
-                # 说明：第一块的 delta 里只有角色没有文字；中间每块是一小段文字；
-                # 最后一块的 delta 是空的（可能带用量统计）。所以用 .get 取、判空。
+                delta = chunk["choices"][0]["delta"]
+
+                # 情况一：一段回答文字（就是它让打字机效果一格格动起来）
+                piece = delta.get("content")
                 if piece:
-                    yield piece
+                    yield {"type": "text", "text": piece}
+
+                # 情况二：工具调用的小碎片，按序号拼起来
+                for call_piece in delta.get("tool_calls") or []:
+                    index = call_piece.get("index", 0)
+                    slot = pending_calls.setdefault(
+                        index, {"id": "", "name": "", "arguments": ""}
+                    )
+                    if call_piece.get("id"):
+                        slot["id"] = call_piece["id"]
+                    fn = call_piece.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        slot["arguments"] += fn["arguments"]   # 参数是一段段拼出来的
+
+            # 4. 流结束：如果攒到了工具调用，作为最后一个事件交出去
+            #    （模型可能"先说一句话，再要求调工具"，所以这一步放在最末）
+            if pending_calls:
+                calls = [pending_calls[i] for i in sorted(pending_calls)]
+                yield {"type": "tool_calls", "tool_calls": calls}
 
     except urllib.error.HTTPError as e:
         # Key 填错了、余额不足、被限流等等

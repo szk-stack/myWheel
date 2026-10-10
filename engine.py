@@ -1,19 +1,27 @@
 """
 engine.py —— 引擎：把整个流程串起来
 
-一次对话的完整流程（关键就这几行）：
+一次对话的完整流程（升级成了"agent 循环"）：
 
-    before_llm 空槽  →  调用模型  →  after_llm 空槽
+    before_llm 空槽
+        ↓
+    [ 调模型（流式）→ 想调工具？→ 执行工具 → 结果塞回历史 → 再调模型 …… ]  ← 循环
+                          └─ 不想调了 → 直接回答 → 结束
+        ↓
+    after_llm 空槽
 
 引擎自己不干具体活儿，只负责"按顺序调度"。
-具体功能都由插件挂在空槽上实现。
+具体功能由插件挂在空槽上、工具登记在 toolbox 注册表里。
 """
 
 import importlib
+import json
 import pkgutil
 
+import config
 import hooks
 import llm
+import toolbox
 
 
 def chat(messages):
@@ -44,17 +52,22 @@ def chat(messages):
 
 
 def chat_stream(messages):
-    """流式版对话流程（生成器）：边收边把文字段交给调用方。
+    """流式版对话流程（生成器）。
 
-    ★ 一个要理解的架构取舍：
-      流式输出时，每个字都已经实时"泼"到用户屏幕上了，
-      after_llm 插件再也没法修改已经显示出来的内容。
-      我们的处理是：
-        - 分段照常流出去（用户要的打字机效果）
-        - 流结束后，把完整回答交给 after_llm 跑一遍——
-          供"记录、统计、日志"类插件使用（它们的修改不会再影响用户）。
-      将来若要做"实时过滤"（如敏感词逐字打码），需要在每个分段上做，
-      那是以后加一个 on_chunk 空槽的课题。
+    ★ 这次升级成了"agent 循环"——从"一问一答"变成"多轮干活"：
+
+        调模型（流式）──► 模型直接回答？ → 结束
+              │
+              └─► 模型说"我要用工具" → 执行工具 → 结果塞回历史 → 再调模型 →……
+
+    产出的事件（都是字典）：
+      {"type": "text", "text": "..."}                           文字增量
+      {"type": "tool_call", "name": "...", "arguments": {...}}  开始执行某个工具
+      {"type": "tool_result", ...}                              工具执行完毕（带结果）
+
+    两个从流式改造时延续下来的取舍（没变）：
+      - before_llm 照常工作（可以改 messages）
+      - after_llm 拿得到完整回答，但改不了已经流出去的内容（只服务记录类用途）
     """
     ctx = {
         "messages": messages,
@@ -62,17 +75,85 @@ def chat_stream(messages):
         "meta": {},
     }
 
-    # ① 调模型之前：before_llm 插件照常工作（可以改 messages）
+    # ① 调模型之前：before_llm 插件照常工作
     hooks.run(hooks.before_llm, ctx)
 
-    # ② 流式调用模型：收到一段就转交给调用方（server 会立刻发给浏览器）
-    pieces = []
-    for piece in llm.chat_stream(ctx["messages"]):
-        pieces.append(piece)
-        yield piece
+    # 准备工具"说明书"（发不发给模型，看 config 里的总开关）
+    tools_desc = toolbox.all_descriptions() if config.ENABLE_TOOLS else []
 
-    # ③ 流结束后：拼出完整回答，交给 after_llm（只用于记录类用途）
-    ctx["reply"] = "".join(pieces)
+    # 工作副本：下面的工具对话都追加在它身上，不动原来的 messages 列表
+    work_messages = list(ctx["messages"])
+
+    # ② agent 循环
+    text_pieces = []      # 攒完整回答（给 after_llm 用）
+    used_rounds = 0       # 已经执行过几轮工具
+
+    while True:
+        pending_calls = None
+
+        # 调一次模型（流式），把文字一段段往外转交
+        for event in llm.chat_stream(work_messages, tools=tools_desc):
+            if event["type"] == "text":
+                text_pieces.append(event["text"])
+                yield event                     # 文字直接往外流
+            elif event["type"] == "tool_calls":
+                pending_calls = event["tool_calls"]
+
+        if not pending_calls:
+            break    # 模型正常答完了 → 收工
+
+        # 保险丝：模型连续调工具的轮数超上限就停（防死循环烧钱）
+        if used_rounds >= config.MAX_TOOL_ROUNDS:
+            print(f"[警告] 工具调用达到上限（{config.MAX_TOOL_ROUNDS} 轮），停止继续执行")
+            break
+        used_rounds += 1
+
+        # ③ 按官方协议，把"模型要求调工具"这件事记进工作历史
+        #    （OpenAI 兼容格式：assistant 消息带 tool_calls 字段）
+        work_messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {"name": call["name"], "arguments": call["arguments"]},
+                }
+                for call in pending_calls
+            ],
+        })
+
+        # 逐个执行这次要求的工具（模型可能一次要调好几个）
+        for call in pending_calls:
+            # 模型给的参数是 JSON 字符串，解析成字典
+            try:
+                arguments = json.loads(call["arguments"] or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+
+            # 告诉外面："要开始执行工具了"（前端用来显示状态）
+            yield {"type": "tool_call", "name": call["name"], "arguments": arguments}
+
+            result = toolbox.call(call["name"], arguments)   # ★ 真正执行！
+
+            # 告诉外面："执行完了"（前端用来显示结果、并记账）
+            yield {
+                "type": "tool_result",
+                "name": call["name"],
+                "arguments": arguments,
+                "ok": not result.startswith("错误"),
+                "result": result,
+            }
+
+            # 按官方协议把结果塞回工作历史（role=tool + 对应的 tool_call_id）
+            work_messages.append({
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "content": result,
+            })
+
+    # ④ 循环结束：把完整回答交给 after_llm（记录类用途，前面解释过）
+    ctx["reply"] = "".join(text_pieces)
     try:
         hooks.run(hooks.after_llm, ctx)
     except Exception as e:
