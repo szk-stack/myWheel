@@ -38,6 +38,10 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         """浏览器"读取"时走这里。"""
+        # 防御：万一有客户端给 GET 带了请求体，先把它读掉——
+        # 否则残留字节会污染同一条连接上的下一个请求（经典坑，实测复现过）
+        self._drain_body()
+
         if self.path in ("/", "/index.html"):
             # 把网页文件发出去
             html = (ROOT / "static" / "index.html").read_bytes()
@@ -64,6 +68,10 @@ class ChatHandler(BaseHTTPRequestHandler):
         # 所以放在最前面，不经过下面"必须先读 JSON"的关卡
         # （否则空请求体会被判成 400，对话框就弹不出来了）
         if self.path == "/api/workspace/pick":
+            # ★ 重要：先把它可能携带的请求体读掉，再处理——
+            #   否则这几个字节会残留在连接里、粘到"下一个请求"的前面，
+            #   造成诡异的 501 / 404 / 连接中断（实测复现过的坑！）
+            self._drain_body()
             self._handle_workspace_pick()
             return
 
@@ -111,17 +119,15 @@ class ChatHandler(BaseHTTPRequestHandler):
     def _handle_workspace_pick(self):
         """弹出一个系统"选择文件夹"对话框，把选中的路径发回前端。
 
-        三个讲究（都是实测踩坑换来的）：
+        两个讲究（都是实测踩坑换来的）：
           ① 优先用 PowerShell 7（pwsh）：它带的对话框是和"打开文件"同款的
              现代样式；机器上没装就退回系统自带的 Windows PowerShell（旧样式）。
           ② 对话框要"抢到最前面"：服务是从后台弹框的，系统默认会让它
              躲在浏览器后面——用一个隐藏的"置顶小窗体"做它的挂靠窗口。
-          ③ 弹框时响一声提示音：就算它被挡住，你也能听到、不错过。
         """
         ps_script = (
             '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
             'Add-Type -AssemblyName System.Windows.Forms; '
-            'try { [console]::beep(800, 150) } catch { }; '
             '$owner = New-Object System.Windows.Forms.Form; '
             '$owner.TopMost = $true; '
             '$owner.ShowInTaskbar = $false; '
@@ -239,6 +245,17 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     # ---------- 下面两个是给上面用的小工具函数 ----------
+
+    def _drain_body(self):
+        """把请求体读出来丢弃（当某个接口不需要 body 时的"清道夫"）。
+
+        这是 HTTP keep-alive 的经典坑：连接被复用时，
+        上一个请求的 body 如果没被读干净，会粘到下一个请求上，
+        把请求行解析搞乱（表现为 501 "Unsupported method"、404 或连接中断）。
+        """
+        length = int(self.headers.get("Content-Length", 0))
+        if length > 0:
+            self.rfile.read(length)
 
     def _read_json(self):
         """小工具：把请求体里的 JSON 读出来，变成字典。"""
