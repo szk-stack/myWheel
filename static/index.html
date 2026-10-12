@@ -105,6 +105,13 @@
     flex-direction: column;
     gap: 12px;
   }
+  #chat > * {
+    /* ★ 重要：禁止聊天条目被"压扁"（10-12 修的一个隐蔽 bug）
+       纵向 flex 容器里，内容超高时子项会被自动收缩；
+       而 overflow:hidden 的子项（比如工具卡片）会被压到接近 0 高度，
+       文字被裁成一条"细线"。这一行让所有条目保持原高、超高就滚动。 */
+    flex-shrink: 0;
+  }
   .msg-wrap {
     display: flex;
     flex-direction: column;
