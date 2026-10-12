@@ -14,7 +14,7 @@ server.py —— 启动入口（用这个文件启动整个项目）
 """
 
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import config
@@ -196,11 +196,15 @@ def main():
     # ② 加载所有工具（把 tools/ 里的工具登记进工具箱）
     toolbox.load_tools()
 
-    # ② 启动 HTTP 服务
+    # ② 启动 HTTP 服务（★ 用"多线程"版本，这很重要！）
+    #    为什么必须多线程？因为浏览器会保持 keep-alive 长连接：
+    #    单线程时，服务器会"守"着一条空闲连接等它的下一个请求，
+    #    其他新连接（比如浏览器并行加载多个脚本文件）会被无限排队 → 整页卡死。
+    #    ThreadingHTTPServer 给每个连接分配一个线程，这个问题就不存在了。
     #    绑定 127.0.0.1 表示"只有本机能访问"，安全，而且不会弹防火墙提示
     address = ("127.0.0.1", config.PORT)
     try:
-        server = HTTPServer(address, ChatHandler)
+        server = ThreadingHTTPServer(address, ChatHandler)
     except OSError:
         print(f"启动失败：端口 {config.PORT} 被占用了！")
         print("解决办法：打开 config.py，把 PORT 改成 8001 再试。")

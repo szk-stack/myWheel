@@ -374,6 +374,15 @@ function currentConv() {
 //   ② DOMPurify：把 HTML 里的危险内容洗掉（<script>、onerror 等）
 //      ——模型输出里万一有不怀好意的内容，到这一步就被"消毒"了
 function renderMarkdown(text) {
+  // 兜底：如果渲染库因为任何原因没加载出来，退化为"纯文本+换行"显示，
+  // 而不是让整个页面崩掉（防御性编程）
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
+  }
   const html = marked.parse(text, { breaks: true });
   // breaks: true —— 让单个换行也能显示成换行（更符合聊天习惯）
   return DOMPurify.sanitize(html);
