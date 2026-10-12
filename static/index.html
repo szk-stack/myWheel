@@ -562,7 +562,11 @@ async function pickWorkspace() {
 
   try {
     // 这个请求会一直等着，直到你在弹出的对话框里选完（或取消）
-    const res = await fetch("/api/workspace/pick", { method: "POST" });
+    const res = await fetch("/api/workspace/pick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),   // 带个空 JSON（接口不需要参数，保持格式统一）
+    });
     const data = await res.json();
 
     if (data.cancelled) return;   // 点了取消 → 什么都不做

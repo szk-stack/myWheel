@@ -59,7 +59,14 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """前端"提交数据"时走这里。"""
-        # 先把请求体里的 JSON 读出来（聊天和保存数据都需要这一步）
+        # 特例：工作区选择接口不需要请求体（它只是"弹个对话框"），
+        # 所以放在最前面，不经过下面"必须先读 JSON"的关卡
+        # （否则空请求体会被判成 400，对话框就弹不出来了）
+        if self.path == "/api/workspace/pick":
+            self._handle_workspace_pick()
+            return
+
+        # 其余接口都需要 JSON 请求体，先把它读出来
         try:
             data = self._read_json()
         except Exception:
@@ -86,10 +93,6 @@ class ChatHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "path": path, "created": created})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
-
-        elif self.path == "/api/workspace/pick":
-            # ---- 工作区选择接口：弹出系统的"选择文件夹"对话框 ----
-            self._handle_workspace_pick()
 
         elif self.path == "/api/events":
             # ---- 事件接口：把前端发来的一批事件追加到日志末尾 ----
