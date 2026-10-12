@@ -15,6 +15,7 @@ server.py —— 启动入口（用这个文件启动整个项目）
 """
 
 import json
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -108,25 +109,38 @@ class ChatHandler(BaseHTTPRequestHandler):
     # ---------- 工作区选择：弹出系统"选择文件夹"对话框 ----------
 
     def _handle_workspace_pick(self):
-        """弹出一个 Windows 原生的"选择文件夹"对话框，把选中的路径发回前端。
+        """弹出一个系统"选择文件夹"对话框，把选中的路径发回前端。
 
-        为什么由后端弹框？浏览器出于安全限制，拿不到本地文件夹的真实路径
-        （网页上传文件夹也只能看到相对名字）。但我们的服务就运行在
-        你自己的电脑上——所以让它调用 PowerShell 弹出原生对话框，
-        体验就和"上传文件"选路径一样了。
+        三个讲究（都是实测踩坑换来的）：
+          ① 优先用 PowerShell 7（pwsh）：它带的对话框是和"打开文件"同款的
+             现代样式；机器上没装就退回系统自带的 Windows PowerShell（旧样式）。
+          ② 对话框要"抢到最前面"：服务是从后台弹框的，系统默认会让它
+             躲在浏览器后面——用一个隐藏的"置顶小窗体"做它的挂靠窗口。
+          ③ 弹框时响一声提示音：就算它被挡住，你也能听到、不错过。
         """
         ps_script = (
             '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
             'Add-Type -AssemblyName System.Windows.Forms; '
+            'try { [console]::beep(800, 150) } catch { }; '
+            '$owner = New-Object System.Windows.Forms.Form; '
+            '$owner.TopMost = $true; '
+            '$owner.ShowInTaskbar = $false; '
+            '$owner.WindowState = "Minimized"; '
+            '$owner.Show(); '
             '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; '
             '$dialog.Description = "选择 agent 的工作区目录（可点「新建文件夹」）"; '
             '$dialog.ShowNewFolderButton = $true; '
-            'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) '
-            '{ Write-Output $dialog.SelectedPath } else { Write-Output "CANCELLED" }'
+            'if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) '
+            '{ Write-Output $dialog.SelectedPath } else { Write-Output "CANCELLED" }; '
+            '$owner.Close()'
         )
+
+        # 优先新版 PowerShell（现代对话框样式），没有就退回系统自带的
+        ps_exe = "pwsh" if shutil.which("pwsh") else "powershell"
+
         try:
             completed = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_script],
+                [ps_exe, "-NoProfile", "-Command", ps_script],
                 capture_output=True, text=True, timeout=600, encoding="utf-8",
                 # 不闪黑窗口（对话框是 GUI，不受影响）
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
