@@ -61,8 +61,9 @@ class ChatHandler(BaseHTTPRequestHandler):
                 "threshold_ratio": config.COMPACT_THRESHOLD_RATIO,
                 "keep_recent": config.KEEP_RECENT_MESSAGES,
                 "enabled": config.ENABLE_COMPACT,
-                # 固定开销（系统人设 + 工具说明书）——前端用量条要把这笔也算上
-                "fixed_overhead": compact_module.fixed_overhead_tokens(),
+                # 每次请求的"固定基线占用量"（系统人设 + 工具说明书）——
+                # 属于"上下文用量"（窗口占用）的固定部分，不是费用
+                "baseline_tokens": compact_module.baseline_tokens(),
             }
             self._send_json(200, state)
 

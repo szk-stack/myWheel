@@ -49,11 +49,13 @@ def estimate_tokens(messages):
     return total
 
 
-def fixed_overhead_tokens():
-    """每次请求都固定要带的开销：系统人设 + 工具说明书。
+def baseline_tokens():
+    """每次请求都要占用的"基线"窗口空间：系统人设 + 工具说明书。
 
-    （这笔 token 也占窗口，估算/触发判断都要算上；
-      前端用量条里的"固定开销"数字也来自这里——单一来源，前后一致）
+    ★ 概念上说清楚（这里很容易混）：
+      这是"上下文用量"（窗口占用）的固定部分——不是"本次花了多少钱"。
+      它每次请求都占在窗口里（也会被计费，但有前缀缓存在，很便宜）。
+      估算/触发判断都要算上它；前端用量条的数字也来自这里（单一来源）。
     """
     fixed = estimate_tokens([{"role": "system", "content": config.SYSTEM_PROMPT}])
     if config.ENABLE_TOOLS:
@@ -170,9 +172,9 @@ def compact_plugin(ctx):
     # ① 先按旧压缩"应用"，得到真正要发给模型的有效上下文
     effective = apply_compaction(messages, old)
 
-    # ② 超阈值？→ 生成新压缩（估算里含"固定开销"：人设 + 工具说明书）
+    # ② 超阈值？→ 生成新压缩（估算里含"固定基线"：人设 + 工具说明书）
     limit = int(config.CONTEXT_WINDOW * config.COMPACT_THRESHOLD_RATIO)
-    used = estimate_tokens(effective) + fixed_overhead_tokens()
+    used = estimate_tokens(effective) + baseline_tokens()
     if used > limit:
         new = make_compaction(messages, old)
         if new:

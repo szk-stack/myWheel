@@ -1130,7 +1130,7 @@ function renderSidebar() {
 
 // 后端配置（窗口大小、压缩阈值等）——init 时从 /api/state 拉取
 // （这里的默认值只是"还没拿到后端配置"时的兜底，按 deepseek-flash 的 1M 窗口）
-let contextConfig = { window: 1000000, threshold_ratio: 0.7, keep_recent: 12, enabled: true, fixed_overhead: 0 };
+let contextConfig = { window: 1000000, threshold_ratio: 0.7, keep_recent: 12, enabled: true, baseline_tokens: 0 };
 
 // 粗略估算：汉字约 0.6 token/字，其他字符约 0.25 token/个，每条消息 +4
 // （和 plugins/compact.py 的 estimate_tokens 保持同一套公式）
@@ -1159,8 +1159,9 @@ function estimateTokens(messages) {
 // 算当前会话的上下文用量（"应用压缩后"的有效上下文）
 function contextUsage(conv) {
   let msgs = conv.messages;   // 工具记录也会随上下文发给模型，一起计入用量
-  // 固定开销：系统人设 + 工具说明书（后端算好、随 /api/state 发来）
-  let used = contextConfig.fixed_overhead || 0;
+  // 固定基线：系统人设 + 工具说明书（后端算好、随 /api/state 发来）
+  // —— 这是"窗口占用"的一部分，不是"费用"
+  let used = contextConfig.baseline_tokens || 0;
   const c = conv.compaction;
   if (c) {
     msgs = msgs.slice(c.first_kept_index);    // 只算保留段
@@ -1191,8 +1192,8 @@ function updateContextMeter() {
   contextDetailEl.textContent =
     "上下文用量（估算）：约 " + info.used.toLocaleString() +
     " / " + info.limit.toLocaleString() + " token\n" +
-    "（含系统人设与工具说明等固定开销约 " +
-    (contextConfig.fixed_overhead || 0).toLocaleString() + " token）\n" +
+    "（其中：系统人设与工具说明每次固定占用约 " +
+    (contextConfig.baseline_tokens || 0).toLocaleString() + " token）\n" +
     "达到 " + info.threshold.toLocaleString() +
     "（" + Math.round(contextConfig.threshold_ratio * 100) + "%）时自动压缩，" +
     "保留最近 " + contextConfig.keep_recent + " 条。\n" +
