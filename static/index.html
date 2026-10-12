@@ -132,7 +132,45 @@
     border: 1px solid #e4e7ee;
     border-bottom-left-radius: 4px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    white-space: normal;       /* 内容渲染成了 HTML，用正常排版（不再保留源码换行） */
   }
+
+  /* ===== AI 回复里的 Markdown 渲染样式（这次新加的） ===== */
+  .msg.ai p { margin: 0 0 8px; }
+  .msg.ai p:last-child { margin-bottom: 0; }
+  .msg.ai h1, .msg.ai h2, .msg.ai h3 { margin: 12px 0 6px; line-height: 1.4; }
+  .msg.ai h1 { font-size: 18px; }
+  .msg.ai h2 { font-size: 16px; }
+  .msg.ai h3 { font-size: 15px; }
+  .msg.ai ul, .msg.ai ol { margin: 6px 0; padding-left: 22px; }
+  .msg.ai li { margin: 2px 0; }
+  .msg.ai code {                      /* 行内代码 */
+    background: #f0f2f6;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+  }
+  .msg.ai pre {                       /* 代码块 */
+    background: #f6f8fa;
+    border: 1px solid #e4e7ee;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 8px 0;
+    overflow-x: auto;
+  }
+  .msg.ai pre code { background: none; padding: 0; }
+  .msg.ai blockquote {
+    margin: 6px 0;
+    padding: 2px 12px;
+    border-left: 3px solid #d8dce6;
+    color: #666;
+  }
+  .msg.ai a { color: #4a7cff; }
+  .msg.ai table { border-collapse: collapse; margin: 8px 0; }
+  .msg.ai th, .msg.ai td { border: 1px solid #d8dce6; padding: 4px 10px; font-size: 14px; }
+  .msg.ai th { background: #f4f6f9; }
+  .msg.ai hr { border: none; border-top: 1px solid #e4e7ee; margin: 10px 0; }
 
   /* ===== 鼠标悬浮在 AI 消息上时，气泡下方浮现的按钮（分支功能） ===== */
   .msg-actions {
@@ -252,6 +290,9 @@
     </footer>
   </main>
 
+<!-- Markdown 渲染库 + 安全清洗库（都是本地文件，不需要联网加载） -->
+<script src="/static/marked.umd.js"></script>
+<script src="/static/purify.js"></script>
 <script>
 // ============================================================
 // 一、状态：页面上所有"会变的东西"都集中放在这里
@@ -321,6 +362,21 @@ async function appendEvents(events) {
 // 取出"当前正在聊"的那个会话对象（找不到就返回 null）
 function currentConv() {
   return state.conversations.find(function (c) { return c.id === state.current_id; });
+}
+
+// ============================================================
+// Markdown 渲染：把 AI 回复里的 **加粗**、# 标题、`代码` 等
+// 变成真正的页面效果（用本地的 marked 库 + DOMPurify 安全清洗）
+// ============================================================
+
+// 渲染流水线（两步）：
+//   ① marked：把 Markdown 原文转成 HTML（加粗、标题、代码块……）
+//   ② DOMPurify：把 HTML 里的危险内容洗掉（<script>、onerror 等）
+//      ——模型输出里万一有不怀好意的内容，到这一步就被"消毒"了
+function renderMarkdown(text) {
+  const html = marked.parse(text, { breaks: true });
+  // breaks: true —— 让单个换行也能显示成换行（更符合聊天习惯）
+  return DOMPurify.sanitize(html);
 }
 
 // ============================================================
@@ -516,9 +572,9 @@ async function sendMessage() {
         if (msg.error) throw new Error(msg.error);
 
         if (msg.type === "text") {
-          // 一段回答文字 → 打字机效果
+          // 一段回答文字 → 打字机效果（每次都重新按 Markdown 渲染全文）
           fullReply += msg.text;
-          bubble.textContent = fullReply;
+          bubble.innerHTML = renderMarkdown(fullReply);
           chatBox.scrollTop = chatBox.scrollHeight;
 
         } else if (msg.type === "tool_call") {
@@ -702,7 +758,13 @@ function addBubble(role, text, branchInfo) {
 
   const div = document.createElement("div");
   div.className = "msg " + role;
-  div.textContent = text;    // 用 textContent 而不是 innerHTML（更安全，不会被输入内容搞破坏）
+  if (role === "ai") {
+    // AI 的回复：按 Markdown 渲染成真正的格式（renderMarkdown 内部先做了转义，防注入）
+    div.innerHTML = renderMarkdown(text);
+  } else {
+    // 用户的消息：原样显示（textContent 天然安全）
+    div.textContent = text;
+  }
   wrap.appendChild(div);
 
   // 可分支的消息：在气泡下方放一个按钮

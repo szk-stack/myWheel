@@ -48,6 +48,10 @@ class ChatHandler(BaseHTTPRequestHandler):
             # 读取接口：回放事件日志，把"推导出来的当前状态"发回去
             self._send_json(200, storage.load_state())
 
+        elif self.path.startswith("/static/"):
+            # 静态资源（比如前端用来渲染 Markdown 的 marked.min.js）
+            self._serve_static_file(self.path[len("/static/"):])
+
         else:
             self.send_error(404, "Not Found")
 
@@ -138,6 +142,30 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(f"{len(done):X}\r\n".encode("utf-8") + done + b"\r\n")
         self.wfile.write(b"0\r\n\r\n")   # 分块编码的结束标记：长度为 0 的块
         self.wfile.flush()
+
+    def _serve_static_file(self, relative_path):
+        """把 static/ 目录里的文件发出去（路径限制在 static 目录内，防越界）。"""
+        static_root = (ROOT / "static").resolve()
+        target = (static_root / relative_path).resolve()
+
+        if not target.is_relative_to(static_root) or not target.is_file():
+            self.send_error(404, "Not Found")
+            return
+
+        data = target.read_bytes()
+        # 简单的类型判断（够我们用了）
+        if target.suffix == ".js":
+            content_type = "application/javascript; charset=utf-8"
+        elif target.suffix == ".css":
+            content_type = "text/css; charset=utf-8"
+        else:
+            content_type = "application/octet-stream"
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     # ---------- 下面两个是给上面用的小工具函数 ----------
 
