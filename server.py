@@ -15,6 +15,7 @@ server.py —— 启动入口（用这个文件启动整个项目）
 """
 
 import json
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -86,6 +87,10 @@ class ChatHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
 
+        elif self.path == "/api/workspace/pick":
+            # ---- 工作区选择接口：弹出系统的"选择文件夹"对话框 ----
+            self._handle_workspace_pick()
+
         elif self.path == "/api/events":
             # ---- 事件接口：把前端发来的一批事件追加到日志末尾 ----
             try:
@@ -96,6 +101,45 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         else:
             self.send_error(404, "Not Found")
+
+    # ---------- 工作区选择：弹出系统"选择文件夹"对话框 ----------
+
+    def _handle_workspace_pick(self):
+        """弹出一个 Windows 原生的"选择文件夹"对话框，把选中的路径发回前端。
+
+        为什么由后端弹框？浏览器出于安全限制，拿不到本地文件夹的真实路径
+        （网页上传文件夹也只能看到相对名字）。但我们的服务就运行在
+        你自己的电脑上——所以让它调用 PowerShell 弹出原生对话框，
+        体验就和"上传文件"选路径一样了。
+        """
+        ps_script = (
+            '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
+            'Add-Type -AssemblyName System.Windows.Forms; '
+            '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; '
+            '$dialog.Description = "选择 agent 的工作区目录（可点「新建文件夹」）"; '
+            '$dialog.ShowNewFolderButton = $true; '
+            'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) '
+            '{ Write-Output $dialog.SelectedPath } else { Write-Output "CANCELLED" }'
+        )
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                capture_output=True, text=True, timeout=600, encoding="utf-8",
+                # 不闪黑窗口（对话框是 GUI，不受影响）
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as e:
+            self._send_json(200, {"ok": False, "error": f"无法弹出选择框：{e}"})
+            return
+
+        out = (completed.stdout or "").strip()
+        if out == "CANCELLED":
+            self._send_json(200, {"ok": False, "cancelled": True})
+        elif not out:
+            detail = (completed.stderr or "").strip()[:200]
+            self._send_json(200, {"ok": False, "error": f"选择框没有返回结果（环境可能不支持图形界面）：{detail}"})
+        else:
+            self._send_json(200, {"ok": True, "path": out})
 
     # ---------- 流式聊天的三个小工具（打字机效果） ----------
 
