@@ -200,7 +200,11 @@ class ChatHandler(BaseHTTPRequestHandler):
             # "事件字典"（文字增量 / 工具调用 / 工具结果），原样转发给浏览器，
             # 前端按里面的 type 字段分别处理
             # 注意：把前端传来的"工作区"一并交给引擎（None = 默认项目目录）
-            for event in engine.chat_stream(data.get("messages", []), workspace=data.get("workspace")):
+            for event in engine.chat_stream(
+                data.get("messages", []),
+                workspace=data.get("workspace"),
+                compaction=data.get("compaction"),   # 压缩状态（compact 插件要用）
+            ):
                 self._send_sse(event)
             self._end_sse()
         except Exception as e:

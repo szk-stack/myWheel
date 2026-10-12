@@ -51,12 +51,50 @@ def chat(messages):
     return ctx["reply"]
 
 
-def chat_stream(messages, workspace=None):
+def _convert_tool_history(messages):
+    """把历史里的"工具记录"转换成模型协议格式。
+
+    我们平时把工具记录存成一条 role=tool 的条目（方便前端显示），
+    但发给模型时要还原成标准的"成对"格式：
+        assistant（带 tool_calls）  +  tool（结果）
+    这样模型就能"看到"它之前读过什么文件、执行过什么——
+    不用每次都重新读一遍。
+    """
+    out = []
+    for m in messages:
+        if m.get("role") == "tool":
+            call_id = f"hist_{len(out)}"   # 历史调用的编号（只需在本次请求内成对）
+            out.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": m.get("name", ""),
+                        "arguments": json.dumps(m.get("arguments") or {}, ensure_ascii=False),
+                    },
+                }],
+            })
+            out.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": m.get("result") or "",
+            })
+        else:
+            out.append(m)
+    return out
+
+
+def chat_stream(messages, workspace=None, compaction=None):
     """流式版对话流程（生成器）。
 
     参数 workspace：本次对话的工作区目录（None = 默认项目目录）——
     由用户在前端设定、随请求传进来；注意：模型没有权力改它，
     它只是被锁在工作区里干活的人。
+
+    参数 compaction：会话的上下文压缩状态（{"summary", "first_kept_index"} 或 None）
+    —— 由前端随请求带来，放进 ctx["meta"] 供 compact 插件使用。
 
     ★ 这次升级成了"agent 循环"——从"一问一答"变成"多轮干活"：
 
@@ -83,6 +121,10 @@ def chat_stream(messages, workspace=None):
     #   （用"线程本地"记录：多线程服务器里，不同对话的请求互不串台）
     toolbox.set_workspace(workspace)
 
+    # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
+    #   "应用"已有的压缩（切成"摘要 + 最近消息"）
+    ctx["meta"]["compaction"] = compaction
+
     # ① 调模型之前：before_llm 插件照常工作
     #    （其中 compact 插件可能在这里做"上下文压缩"——它会应用旧压缩，
     #      并在超阈值时生成新摘要，结果记在 ctx["meta"] 里）
@@ -101,8 +143,10 @@ def chat_stream(messages, workspace=None):
     # 准备工具"说明书"（发不发给模型，看 config 里的总开关）
     tools_desc = toolbox.all_descriptions() if config.ENABLE_TOOLS else []
 
-    # 工作副本：下面的工具对话都追加在它身上，不动原来的 messages 列表
-    work_messages = list(ctx["messages"])
+    # 工作副本：先把历史里的"工具记录"转换成模型能读懂的标准格式
+    # （工具结果从此会跟着上下文发给模型——它不用重复读文件了），
+    # 之后的工具对话也追加在它身上，不动原来的 messages 列表
+    work_messages = _convert_tool_history(ctx["messages"])
 
     # ② agent 循环
     text_pieces = []      # 攒完整回答（给 after_llm 用）

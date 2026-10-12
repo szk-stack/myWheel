@@ -785,7 +785,7 @@ async function manualCompact() {
   compactNowBtn.textContent = "压缩中…（要调一次模型）";
 
   try {
-    const messages = conv.messages.filter(function (m) { return m.role !== "tool"; });
+    const messages = conv.messages;   // 完整时间线（含工具记录；下标与压缩状态保持一致）
     const res = await fetch("/api/compact", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -919,19 +919,18 @@ async function sendMessage() {
 
   try {
     // 3. 调后端的流式聊天接口
-    //    ★ 注意过滤：工具记录（role=tool）只是"给人看的账本"，
-    //      发给模型时要去掉——模型的上下文里只有人话
-    const historyForModel = conv.messages.filter(function (m) {
-      return m.role !== "tool";
-    });
+    //    ★ 发送完整时间线（含"工具记录"）：后端会先按压缩状态切片，
+    //      再把工具记录转换成模型协议格式——这样模型能"记得"自己
+    //      之前读过什么，不用重复读文件
+    const fullHistory = conv.messages;
     const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-      messages: historyForModel,
-      workspace: conv.workspace || null,
-      compaction: conv.compaction || null,   // 当前压缩状态（后端据此"应用"压缩）
-    }),
+        messages: fullHistory,
+        workspace: conv.workspace || null,
+        compaction: conv.compaction || null,   // 当前压缩状态（后端据此"应用"压缩）
+      }),
     });
     if (!res.ok || !res.body) {
       throw new Error("服务未就绪（HTTP " + res.status + "），请重启 server.py 后再试");
@@ -1151,7 +1150,7 @@ function estimateTokens(messages) {
 
 // 算当前会话的上下文用量（"应用压缩后"的有效上下文）
 function contextUsage(conv) {
-  let msgs = conv.messages.filter(function (m) { return m.role !== "tool"; });
+  let msgs = conv.messages;   // 工具记录也会随上下文发给模型，一起计入用量
   let used = 0;
   const c = conv.compaction;
   if (c) {

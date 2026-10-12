@@ -86,6 +86,10 @@ def make_compaction(messages, old=None):
     for m in to_absorb:
         if m.get("role") == "system":
             continue
+        if m.get("role") == "tool":
+            # 工具记录也压进摘要（截前 500 字符，避免素材太长）
+            lines.append(f"（工具 {m.get('name', '')} 的结果）{str(m.get('result', ''))[:500]}")
+            continue
         speaker = "用户" if m.get("role") == "user" else "助手"
         lines.append(f"{speaker}：{m.get('content', '')}")
     parts.append("\n".join(lines))
