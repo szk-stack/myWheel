@@ -543,11 +543,22 @@ async function sendMessage() {
   sending = true;
   renderAll();
 
-  // ★ 拿到"思考中…"气泡的引用：流式收到的每一段文字直接写在它身上
-  //   （不做整页重绘——不然每来一个字就重建整个界面，会非常卡）
-  const bubble = thinkingEl;
-  let fullReply = "";      // 攒起来的完整回答
-  const roundTools = [];   // 本轮用过的工具记录（流结束后要记账）
+  // ★ 本轮回答要按"时间线"分段落：
+  //   模型可能"先说一句话 → 调用工具 → 再接着说"，
+  //   所以拆成 [{text:"我先看看…"}, {tool:…}, {text:"我把读了一遍…"}] 这样的数组，
+  //   回放/显示时顺序才和真实发生的一致。
+  const segments = [];
+  let currentText = "";            // 正在累积的这一段文字
+  let currentBubble = thinkingEl;  // 正在生长的气泡（被工具打断后，下一段文字换新气泡）
+
+  // 小工具：把累积的文字"封成一段"（工具调用前、流结束时都会用到）
+  function closeTextSegment() {
+    if (currentText) {
+      segments.push({ type: "text", text: currentText });
+      currentText = "";
+    }
+  }
+
   const toolLines = [];    // 流式过程中"正在调用…"的临时状态行元素
 
   try {
@@ -566,7 +577,7 @@ async function sendMessage() {
       throw new Error("服务未就绪（HTTP " + res.status + "），请重启 server.py 后再试");
     }
 
-    // 4. 流式读取（和上一版一样：逐块读 + 缓冲区兜住"半行"）
+    // 4. 流式读取（逐块读 + 缓冲区兜住"半行"）
     const reader = res.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
@@ -588,27 +599,36 @@ async function sendMessage() {
         if (msg.error) throw new Error(msg.error);
 
         if (msg.type === "text") {
-          // 一段回答文字 → 打字机效果（每次都重新按 Markdown 渲染全文）
-          fullReply += msg.text;
-          bubble.innerHTML = renderMarkdown(fullReply);
+          // 一段回答文字 → 打字机效果
+          // 如果当前没有"生长中的气泡"（说明上一段被工具打断了），先新建一个
+          if (!currentBubble) {
+            currentBubble = addBubble("ai", "");
+          }
+          currentText += msg.text;
+          currentBubble.innerHTML = renderMarkdown(currentText);
           chatBox.scrollTop = chatBox.scrollHeight;
 
         } else if (msg.type === "tool_call") {
-          // 模型要调工具了 → 在回答气泡上方加一行临时状态
+          // 模型要调工具了 → 先把刚才那段文字"封段"，当前气泡到此为止
+          closeTextSegment();
+          currentBubble = null;
+
+          // 加一行临时状态（追加在时间线末尾，顺序自然正确）
           const lineEl = document.createElement("div");
           lineEl.className = "tool-line";
           lineEl.textContent = "正在调用工具 " + msg.name + " …";
-          chatBox.insertBefore(lineEl, bubble.parentElement);
+          chatBox.appendChild(lineEl);
           toolLines.push(lineEl);
           chatBox.scrollTop = chatBox.scrollHeight;
 
         } else if (msg.type === "tool_result") {
-          // 工具执行完了 → 更新那一行状态，并记录下来（结束后要记账）
+          // 工具执行完了 → 更新那一行状态，并把这次工具记进时间线
           const lineEl = toolLines.shift();
           if (lineEl) {
             lineEl.textContent = "工具 " + msg.name + (msg.ok ? " 执行完成" : " 执行失败");
           }
-          roundTools.push({
+          segments.push({
+            type: "tool",
             name: msg.name,
             arguments: msg.arguments,
             result: msg.result,
@@ -619,36 +639,44 @@ async function sendMessage() {
       }
     }
 
-    // 5. 流正常结束 → 把工具记录和最终回答记进内存
-    //    顺序就是实际发生顺序：…… → 工具们 → AI 的回答
-    roundTools.forEach(function (t) {
-      conv.messages.push({
-        role: "tool",
-        name: t.name,
-        arguments: t.arguments,
-        result: t.result,
-        ok: t.ok,
-      });
-    });
-    conv.messages.push({ role: "assistant", content: fullReply });
+    // 流结束：最后一段文字也封段
+    closeTextSegment();
 
-    // 6. 记账：把这一轮发生的事写成事件，一次性批量追加
-    //    （user → tool…… → assistant；工具记录也进日志，方便回溯）
+    // 5. 按 segments 的顺序写进内存（顺序 = 真实发生的顺序）
+    segments.forEach(function (seg) {
+      if (seg.type === "text") {
+        conv.messages.push({ role: "assistant", content: seg.text });
+      } else {
+        conv.messages.push({
+          role: "tool",
+          name: seg.name,
+          arguments: seg.arguments,
+          result: seg.result,
+          ok: seg.ok,
+        });
+      }
+    });
+
+    // 6. 记账：按同样顺序生成事件，一次性批量追加
+    //    （user → [文字/工具 交替] → 完成；工具记录也进日志，方便回溯）
     const events = [
       { type: "message", conversation_id: conv.id, role: "user", content: text },
     ];
-    roundTools.forEach(function (t) {
-      events.push({
-        type: "tool",
-        conversation_id: conv.id,
-        name: t.name,
-        arguments: t.arguments,
-        result: t.result,
-        ok: t.ok,
-      });
-    });
-    events.push({
-      type: "message", conversation_id: conv.id, role: "assistant", content: fullReply,
+    segments.forEach(function (seg) {
+      if (seg.type === "text") {
+        events.push({
+          type: "message", conversation_id: conv.id, role: "assistant", content: seg.text,
+        });
+      } else {
+        events.push({
+          type: "tool",
+          conversation_id: conv.id,
+          name: seg.name,
+          arguments: seg.arguments,
+          result: seg.result,
+          ok: seg.ok,
+        });
+      }
     });
     if (conv.title === "新对话") {
       conv.title = text.slice(0, 12);   // 取前 12 个字当标题
@@ -667,7 +695,7 @@ async function sendMessage() {
   }
 
   // 7. 收尾：退出发送状态，重新渲染
-  //    （这时工具记录会变成正式的小卡片、回答气泡会被正式渲染替换）
+  //    （这时工具记录会变成正式的小卡片、各段回答会被正式渲染）
   sending = false;
   renderAll();
   input.focus();
