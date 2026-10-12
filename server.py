@@ -55,11 +55,14 @@ class ChatHandler(BaseHTTPRequestHandler):
             # 读取接口：回放事件日志，把"推导出来的当前状态"发回去；
             # 顺带带上"上下文配置"（前端画用量条和压缩阈值刻度要用）
             state = storage.load_state()
+            import plugins.compact as compact_module
             state["context_config"] = {
                 "window": config.CONTEXT_WINDOW,
                 "threshold_ratio": config.COMPACT_THRESHOLD_RATIO,
                 "keep_recent": config.KEEP_RECENT_MESSAGES,
                 "enabled": config.ENABLE_COMPACT,
+                # 固定开销（系统人设 + 工具说明书）——前端用量条要把这笔也算上
+                "fixed_overhead": compact_module.fixed_overhead_tokens(),
             }
             self._send_json(200, state)
 

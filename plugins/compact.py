@@ -14,8 +14,12 @@
   压缩只是"追加一条记录"，历史永远可查。
 """
 
+import json
+import math
+
 import config
 import llm
+import toolbox
 from hooks import before_llm
 
 
@@ -28,11 +32,36 @@ from hooks import before_llm
 def estimate_tokens(messages):
     total = 0
     for m in messages:
-        text = m.get("content") or ""
+        if m.get("role") == "tool":
+            # 工具条目的正文在 result 里（参数也占一点），而且它发给模型时
+            # 会展开成"两条消息"（assistant 壳 + tool 结果）——这里如实算
+            # （紧凑分隔符：和前端 JS 的 JSON.stringify 输出对齐，保证两边同值）
+            args_json = json.dumps(m.get("arguments") or {}, ensure_ascii=False, separators=(",", ":"))
+            text = (m.get("result") or "") + args_json
+            extra = 4
+        else:
+            text = m.get("content") or ""
+            extra = 0
         cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
         other = len(text) - cjk
-        total += int(cjk * 0.6 + other * 0.25) + 4
+        # 向上取整（和前端 JS 的 Math.ceil 对齐，保证两边算出的数字一致）
+        total += math.ceil(cjk * 0.6 + other * 0.25) + 4 + extra
     return total
+
+
+def fixed_overhead_tokens():
+    """每次请求都固定要带的开销：系统人设 + 工具说明书。
+
+    （这笔 token 也占窗口，估算/触发判断都要算上；
+      前端用量条里的"固定开销"数字也来自这里——单一来源，前后一致）
+    """
+    fixed = estimate_tokens([{"role": "system", "content": config.SYSTEM_PROMPT}])
+    if config.ENABLE_TOOLS:
+        fixed += estimate_tokens([{
+            "role": "system",
+            "content": json.dumps(toolbox.all_descriptions(), ensure_ascii=False),
+        }])
+    return fixed
 
 
 # 让模型做摘要时的"工作要求"
@@ -141,9 +170,9 @@ def compact_plugin(ctx):
     # ① 先按旧压缩"应用"，得到真正要发给模型的有效上下文
     effective = apply_compaction(messages, old)
 
-    # ② 超阈值？→ 生成新压缩
+    # ② 超阈值？→ 生成新压缩（估算里含"固定开销"：人设 + 工具说明书）
     limit = int(config.CONTEXT_WINDOW * config.COMPACT_THRESHOLD_RATIO)
-    used = estimate_tokens(effective)
+    used = estimate_tokens(effective) + fixed_overhead_tokens()
     if used > limit:
         new = make_compaction(messages, old)
         if new:
