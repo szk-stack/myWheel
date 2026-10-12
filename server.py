@@ -52,8 +52,16 @@ class ChatHandler(BaseHTTPRequestHandler):
             self.wfile.write(html)
 
         elif self.path == "/api/state":
-            # 读取接口：回放事件日志，把"推导出来的当前状态"发回去
-            self._send_json(200, storage.load_state())
+            # 读取接口：回放事件日志，把"推导出来的当前状态"发回去；
+            # 顺带带上"上下文配置"（前端画用量条和压缩阈值刻度要用）
+            state = storage.load_state()
+            state["context_config"] = {
+                "window": config.CONTEXT_WINDOW,
+                "threshold_ratio": config.COMPACT_THRESHOLD_RATIO,
+                "keep_recent": config.KEEP_RECENT_MESSAGES,
+                "enabled": config.ENABLE_COMPACT,
+            }
+            self._send_json(200, state)
 
         elif self.path.startswith("/static/"):
             # 静态资源（比如前端用来渲染 Markdown 的 marked.min.js）
@@ -100,6 +108,20 @@ class ChatHandler(BaseHTTPRequestHandler):
             try:
                 path, created = toolbox.prepare_workspace(data.get("path", ""))
                 self._send_json(200, {"ok": True, "path": path, "created": created})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+
+        elif self.path == "/api/compact":
+            # ---- 手动压缩接口：把较早的对话总结成摘要（界面"立即压缩"按钮用）----
+            try:
+                import plugins.compact as compact_module
+                result = compact_module.make_compaction(
+                    data.get("messages", []), data.get("compaction")
+                )
+                if result is None:
+                    self._send_json(200, {"ok": False, "error": "消息还太少，暂时不需要压缩"})
+                else:
+                    self._send_json(200, {"ok": True, **result})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
 

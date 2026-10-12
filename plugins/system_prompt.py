@@ -13,8 +13,13 @@ def add_system_prompt(ctx):
     """把系统提示词插到消息列表的最前面。"""
     messages = ctx["messages"]
 
-    # 如果最前面还没有系统提示词，就插一条
-    if not messages or messages[0].get("role") != "system":
+    # 用"内容"判断人设是否已经插过（而不是只看第一条是不是 system）——
+    # 因为上下文压缩产生的"摘要"也是 system 消息，不能把它错认成人设
+    has_persona = any(
+        m.get("role") == "system" and m.get("content") == config.SYSTEM_PROMPT
+        for m in messages
+    )
+    if not has_persona:
         messages.insert(0, {"role": "system", "content": config.SYSTEM_PROMPT})
 
 

@@ -81,7 +81,8 @@ def load_state():
                 "id": event["id"],
                 "title": event.get("title", "新对话"),
                 "messages": [],
-                "workspace": None,   # 工作区（None = 默认项目目录）
+                "workspace": None,    # 工作区（None = 默认项目目录）
+                "compaction": None,   # 上下文压缩状态（摘要 + 保留边界）
             })
 
         elif etype == "message":
@@ -113,6 +114,16 @@ def load_state():
             conv = _find(conversations, event.get("conversation_id"))
             if conv is not None:
                 conv["workspace"] = event.get("path")
+
+        elif etype == "compact":
+            # 上下文压缩记录：更新会话的压缩状态（最新一条覆盖旧的）
+            # 被压缩的原始消息仍然完好地留在日志里，只是"发送时不再带上"
+            conv = _find(conversations, event.get("conversation_id"))
+            if conv is not None:
+                conv["compaction"] = {
+                    "summary": event.get("summary"),
+                    "first_kept_index": event.get("first_kept_index", 0),
+                }
 
         elif etype == "rename":
             # 会话改名

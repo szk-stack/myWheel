@@ -103,8 +103,79 @@
 
   /* ===== 输入框上方的工作区设置（点标签弹出小菜单） ===== */
   #workspaceBar {
-    position: relative;            /* 小菜单的定位锚点 */
+    position: relative;            /* 小菜单/弹层的定位锚点 */
+    display: flex;                 /* 左：工作区标签；右：上下文用量 */
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
   }
+
+  /* ===== 上下文用量计量（这次新加的） ===== */
+  #contextMeter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+  }
+  #contextMeter:hover { color: #3b6ae8; }
+  #contextMeter.warning { color: #c0392b; }        /* 接近压缩阈值时变红 */
+  #contextBar {
+    position: relative;
+    width: 90px;
+    height: 6px;
+    background: #e8ebf2;
+    border-radius: 3px;
+  }
+  #contextFill {
+    height: 100%;
+    width: 0%;
+    background: #7fa8e8;
+    border-radius: 3px;
+    transition: width 0.3s;
+  }
+  #contextMeter.warning #contextFill { background: #e08a6a; }
+  #contextMark {                 /* 压缩阈值的位置刻度 */
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    background: #c0392b;
+    opacity: 0.75;
+  }
+  #contextPanel {
+    position: absolute;
+    bottom: 130%;                /* 向上弹出 */
+    right: 0;                    /* 贴着右边缘 */
+    background: #fff;
+    border: 1px solid #d8dce6;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 12px 14px;
+    min-width: 280px;
+    z-index: 10;
+  }
+  #contextPanel.hidden { display: none; }
+  #contextDetail {
+    font-size: 12px;
+    color: #555;
+    line-height: 1.8;
+    margin-bottom: 10px;
+    white-space: pre-line;       /* 让文本里的换行正常显示 */
+  }
+  #compactNowBtn {
+    border: 1px solid #4a7cff;
+    background: #fff;
+    color: #4a7cff;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #compactNowBtn:hover { background: #eef3ff; }
+  #compactNowBtn:disabled { opacity: 0.6; cursor: not-allowed; }
   #workspaceTag {
     font-size: 12px;
     color: #888;
@@ -296,6 +367,37 @@
   }
   .tool-card.open .tool-card-body { display: block; }
   .tool-card.fail .tool-card-head { color: #c0392b; }
+
+  /* ===== 压缩卡片（消息区顶部："早期对话已合并为摘要"） ===== */
+  .compact-card {
+    align-self: flex-start;
+    max-width: 90%;
+    font-size: 12px;
+    color: #666;
+    background: #f3f0fa;
+    border: 1px solid #e2dbf2;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .compact-card-head {
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .compact-card-head:hover { background: #eae4f7; }
+  .compact-card-body {
+    display: none;
+    padding: 8px 10px;
+    border-top: 1px solid #e2dbf2;
+    background: #fff;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .compact-card.open .compact-card-body { display: block; }
   .msg.error {                 /* 出错提示：浅红色气泡 */
     background: #fff5f5;
     border-color: #ffd9d9;
@@ -354,13 +456,26 @@
     </header>
     <div id="chat"></div>
     <footer>
-      <!-- 输入框上方：工作区设置（点标签弹出小菜单） -->
+      <!-- 输入框上方：工作区设置 + 上下文用量（点标签/计量条弹小面板） -->
       <div id="workspaceBar">
         <button id="workspaceTag" title="点击设置工作区（agent 的干活范围）">工作区：项目目录 ▾</button>
         <div id="workspaceMenu" class="hidden">
           <button data-action="pick">浏览选择文件夹…</button>
           <button data-action="manual">手动输入路径…</button>
           <button data-action="reset">恢复默认（项目目录）</button>
+        </div>
+
+        <!-- 上下文用量计量（点击弹出详情 + 手动压缩）-->
+        <div id="contextMeter" title="上下文用量（点击看详情）">
+          <span id="contextText">上下文 ≈0%</span>
+          <div id="contextBar">
+            <div id="contextFill"></div>
+            <div id="contextMark"></div>
+          </div>
+        </div>
+        <div id="contextPanel" class="hidden">
+          <div id="contextDetail">…</div>
+          <button id="compactNowBtn">立即压缩</button>
         </div>
       </div>
       <div id="inputRow">
@@ -391,6 +506,7 @@
 //   message —— 新的一条消息        { type:"message", conversation_id, role, content }
 //   tool    —— 一次工具调用记录    { type:"tool", conversation_id, name, arguments, result, ok }
 //   workspace —— 设定会话的工作区   { type:"workspace", conversation_id, path }（path=null 恢复默认）
+//   compact  —— 上下文压缩记录      { type:"compact", conversation_id, summary, first_kept_index }
 //   rename  —— 会话改名            { type:"rename", id, title }
 //   delete  —— 删除会话            { type:"delete", id }
 //   switch  —— 切换当前会话        { type:"switch", id }
@@ -415,6 +531,13 @@ const convListEl = document.getElementById("convList");
 const titleTextEl = document.getElementById("titleText");        // 标题栏里的会话名
 const workspaceTagEl = document.getElementById("workspaceTag");  // 输入框上方的工作区标签
 const workspaceMenuEl = document.getElementById("workspaceMenu");// 工作区小菜单
+const contextMeterEl = document.getElementById("contextMeter");   // 上下文计量组件
+const contextTextEl = document.getElementById("contextText");     // 计量文字
+const contextFillEl = document.getElementById("contextFill");     // 用量条填充
+const contextMarkEl = document.getElementById("contextMark");     // 压缩阈值刻度
+const contextPanelEl = document.getElementById("contextPanel");   // 计量详情弹层
+const contextDetailEl = document.getElementById("contextDetail"); // 详情文字
+const compactNowBtn = document.getElementById("compactNowBtn");   // 立即压缩按钮
 const chatBox = document.getElementById("chat");
 const input = document.getElementById("input");
 const btn = document.getElementById("btn");
@@ -550,8 +673,9 @@ async function renameConversation(id) {
 //   ③ 恢复默认（项目目录）
 // ============================================================
 
-// 点标签：开/关小菜单
+// 点标签：开/关工作区小菜单（和上下文面板互斥）
 function toggleWorkspaceMenu() {
+  contextPanelEl.classList.add("hidden");
   workspaceMenuEl.classList.toggle("hidden");
 }
 
@@ -642,6 +766,58 @@ async function applyWorkspace(path) {
 
   } catch (err) {
     alert("连接后端失败，请确认 server.py 正在运行");
+  }
+}
+
+// ---------- 上下文计量：点开详情弹层 + 手动压缩 ----------
+
+function toggleContextPanel() {
+  workspaceMenuEl.classList.add("hidden");   // 两个小面板互斥
+  contextPanelEl.classList.toggle("hidden");
+}
+
+// 【立即压缩】把较早的对话交给后端总结成摘要（同自动压缩走同一套逻辑）
+async function manualCompact() {
+  const conv = currentConv();
+  if (!conv) return;
+
+  compactNowBtn.disabled = true;
+  compactNowBtn.textContent = "压缩中…（要调一次模型）";
+
+  try {
+    const messages = conv.messages.filter(function (m) { return m.role !== "tool"; });
+    const res = await fetch("/api/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: messages, compaction: conv.compaction || null }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert("压缩失败：" + data.error);
+      return;
+    }
+    if (!data.ok) {
+      alert(data.error || "暂时不需要压缩");
+      return;
+    }
+
+    // 成功：更新内存 + 记账（刷新后还在）
+    conv.compaction = { summary: data.summary, first_kept_index: data.first_kept_index };
+    await appendEvents([{
+      type: "compact",
+      conversation_id: conv.id,
+      summary: data.summary,
+      first_kept_index: data.first_kept_index,
+    }]);
+    contextPanelEl.classList.add("hidden");
+    renderAll();
+
+  } catch (err) {
+    alert("连接后端失败，请确认 server.py 正在运行");
+  } finally {
+    compactNowBtn.disabled = false;
+    compactNowBtn.textContent = "立即压缩";
   }
 }
 
@@ -739,6 +915,7 @@ async function sendMessage() {
   }
 
   const toolLines = [];    // 流式过程中"正在调用…"的临时状态行元素
+  let compactEvent = null; // 本轮若发生"自动压缩"，记下来（结束时一起记账）
 
   try {
     // 3. 调后端的流式聊天接口
@@ -750,7 +927,11 @@ async function sendMessage() {
     const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: historyForModel, workspace: conv.workspace || null }),
+      body: JSON.stringify({
+      messages: historyForModel,
+      workspace: conv.workspace || null,
+      compaction: conv.compaction || null,   // 当前压缩状态（后端据此"应用"压缩）
+    }),
     });
     if (!res.ok || !res.body) {
       throw new Error("服务未就绪（HTTP " + res.status + "），请重启 server.py 后再试");
@@ -814,6 +995,19 @@ async function sendMessage() {
             ok: msg.ok,
           });
           chatBox.scrollTop = chatBox.scrollHeight;
+
+        } else if (msg.type === "compacted") {
+          // 后端在本轮对话里做了"自动压缩"（上下文超阈值了）：
+          // ① 更新内存里的压缩状态 ② 记下来（结束时统一记账）
+          // ③ 只刷新用量条——不能重建消息区（回复还在流式生长中）
+          conv.compaction = { summary: msg.summary, first_kept_index: msg.first_kept_index };
+          compactEvent = {
+            type: "compact",
+            conversation_id: conv.id,
+            summary: msg.summary,
+            first_kept_index: msg.first_kept_index,
+          };
+          updateContextMeter();
         }
       }
     }
@@ -838,9 +1032,9 @@ async function sendMessage() {
 
     // 6. 记账：按同样顺序生成事件，一次性批量追加
     //    （user → [文字/工具 交替] → 完成；工具记录也进日志，方便回溯）
-    const events = [
-      { type: "message", conversation_id: conv.id, role: "user", content: text },
-    ];
+    const events = [];
+    if (compactEvent) events.push(compactEvent);   // 压缩记录排最前（本轮的附注）
+    events.push({ type: "message", conversation_id: conv.id, role: "user", content: text });
     segments.forEach(function (seg) {
       if (seg.type === "text") {
         events.push({
@@ -885,8 +1079,9 @@ async function sendMessage() {
 //     （任何时候状态变了，就调一次 renderAll，页面永远和状态一致）
 // ============================================================
 function renderAll() {
-  renderSidebar();     // 左：对话列表
-  renderMessages();    // 右：消息 + 标题
+  renderSidebar();          // 左：对话列表
+  renderMessages();         // 右：消息 + 标题
+  updateContextMeter();     // 输入框上方：上下文用量条
   btn.disabled = sending;   // 等回复时把发送按钮禁掉，防止重复发送
 }
 
@@ -929,6 +1124,72 @@ function renderSidebar() {
   });
 }
 
+// ============================================================
+// 上下文计量：估算"发给模型的上下文"用了多少 token
+// （和 plugins/compact.py 的 estimate_tokens 保持同一套公式）
+// ============================================================
+
+// 后端配置（窗口大小、压缩阈值等）——init 时从 /api/state 拉取
+let contextConfig = { window: 128000, threshold_ratio: 0.7, keep_recent: 12, enabled: true };
+
+// 粗略估算：汉字约 0.6 token/字，其他字符约 0.25 token/个，每条消息 +4
+function estimateTokens(messages) {
+  let total = 0;
+  for (const m of messages) {
+    const text = m.content || "";
+    let cjk = 0;
+    let other = 0;
+    for (const ch of text) {
+      if (ch >= "\u4e00" && ch <= "\u9fff") cjk++;
+      else other++;
+    }
+    total += Math.ceil(cjk * 0.6 + other * 0.25) + 4;
+  }
+  return total;
+}
+
+// 算当前会话的上下文用量（"应用压缩后"的有效上下文）
+function contextUsage(conv) {
+  let msgs = conv.messages.filter(function (m) { return m.role !== "tool"; });
+  let used = 0;
+  const c = conv.compaction;
+  if (c) {
+    msgs = msgs.slice(c.first_kept_index);    // 只算保留段
+    used += estimateTokens([{ role: "system", content: c.summary }]);   // 加上摘要
+  }
+  used += estimateTokens(msgs);
+  const limit = contextConfig.window;
+  const threshold = Math.floor(limit * contextConfig.threshold_ratio);
+  return { used: used, limit: limit, threshold: threshold };
+}
+
+// 刷新计量条（renderAll 里会调用；收到"已压缩"事件时也会单独调用）
+function updateContextMeter() {
+  const conv = currentConv();
+  if (!conv) return;
+
+  const info = contextUsage(conv);
+  const percent = Math.min(100, Math.round(info.used / info.limit * 100));
+
+  contextTextEl.textContent = "上下文 ≈" + percent + "%";
+  contextFillEl.style.width = percent + "%";
+  // 压缩阈值刻度线的位置
+  contextMarkEl.style.left = "calc(" + (contextConfig.threshold_ratio * 100) + "% - 1px)";
+  // 用量超过阈值的 90% 时变红提醒
+  contextMeterEl.classList.toggle("warning", info.used > info.threshold * 0.9);
+
+  // 详情弹层里的文案
+  contextDetailEl.textContent =
+    "上下文用量（估算）：约 " + info.used.toLocaleString() +
+    " / " + info.limit.toLocaleString() + " token\n" +
+    "达到 " + info.threshold.toLocaleString() +
+    "（" + Math.round(contextConfig.threshold_ratio * 100) + "%）时自动压缩，" +
+    "保留最近 " + contextConfig.keep_recent + " 条。\n" +
+    (conv.compaction
+      ? "已压缩：" + conv.compaction.first_kept_index + " 条之前的历史已合并为摘要。"
+      : "尚未压缩过。");
+}
+
 // 路径太长时缩短显示（只影响界面，不影响真实路径）
 function shortenPath(p) {
   if (p.length <= 32) return p;
@@ -948,6 +1209,11 @@ function renderMessages() {
     : "默认工作区：项目目录（点击修改）";
 
   chatBox.innerHTML = "";       // 同样先清空
+
+  // 如果这个会话压缩过：先在最顶部放一张"压缩卡片"（代表被吸收的早期对话）
+  if (conv && conv.compaction) {
+    addCompactionCard(conv.compaction);
+  }
 
   // 把会话里的每条消息画成气泡（或工具卡片）
   if (conv) {
@@ -1050,6 +1316,29 @@ function addToolCard(tool) {
   chatBox.scrollTop = chatBox.scrollHeight;
 }
 
+// ---------- 压缩卡片：表示"之前的历史已合并为摘要" ----------
+function addCompactionCard(compaction) {
+  const card = document.createElement("div");
+  card.className = "compact-card";
+
+  const head = document.createElement("div");
+  head.className = "compact-card-head";
+  head.textContent = "已压缩早期对话（前 " + compaction.first_kept_index +
+    " 条已合并为摘要）—— 点击查看摘要";
+
+  const body = document.createElement("div");
+  body.className = "compact-card-body";
+  body.textContent = compaction.summary || "";
+
+  head.addEventListener("click", function () {
+    card.classList.toggle("open");
+  });
+
+  card.appendChild(head);
+  card.appendChild(body);
+  chatBox.appendChild(card);
+}
+
 // ============================================================
 // 六、启动：页面打开时，先读状态，再画出界面
 // ============================================================
@@ -1061,6 +1350,9 @@ async function init() {
     const data = await res.json();
     state.conversations = data.conversations || [];
     state.current_id = data.current_id || null;
+    if (data.context_config) {
+      contextConfig = data.context_config;   // 后端配置（窗口大小/压缩阈值/保留条数）
+    }
   } catch (err) {
     console.warn("读取状态失败（后端没启动？）：", err);
     // 读不到也没关系，就用空数据继续
@@ -1094,10 +1386,15 @@ document.querySelectorAll("#workspaceMenu button").forEach(function (menuBtn) {
   });
 });
 
-// 点页面其他地方 → 自动收起工作区菜单
+// 上下文计量：点击弹开详情面板；"立即压缩"按钮
+contextMeterEl.addEventListener("click", toggleContextPanel);
+compactNowBtn.addEventListener("click", manualCompact);
+
+// 点页面其他地方 → 自动收起那些小面板
 document.addEventListener("click", function (e) {
   if (!e.target.closest("#workspaceBar")) {
     workspaceMenuEl.classList.add("hidden");
+    contextPanelEl.classList.add("hidden");
   }
 });
 btn.addEventListener("click", sendMessage);

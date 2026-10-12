@@ -84,7 +84,19 @@ def chat_stream(messages, workspace=None):
     toolbox.set_workspace(workspace)
 
     # ① 调模型之前：before_llm 插件照常工作
+    #    （其中 compact 插件可能在这里做"上下文压缩"——它会应用旧压缩，
+    #      并在超阈值时生成新摘要，结果记在 ctx["meta"] 里）
     hooks.run(hooks.before_llm, ctx)
+
+    # ★ 如果刚才发生了压缩，把这件事告诉前端（记账 + 显示压缩卡片 + 用量回落）
+    if ctx["meta"].get("new_compaction"):
+        new_c = ctx["meta"]["new_compaction"]
+        yield {
+            "type": "compacted",
+            "summary": new_c["summary"],
+            "first_kept_index": new_c["first_kept_index"],
+            "tokens_before": ctx["meta"].get("tokens_before_compact", 0),
+        }
 
     # 准备工具"说明书"（发不发给模型，看 config 里的总开关）
     tools_desc = toolbox.all_descriptions() if config.ENABLE_TOOLS else []

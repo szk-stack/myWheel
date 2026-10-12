@@ -40,5 +40,19 @@ ENABLE_TOOLS = True
 # 保险丝：一轮对话里最多允许模型连续调用工具几轮（防止它死循环烧钱）
 MAX_TOOL_ROUNDS = 8
 
+# ===== 上下文管理（自动压缩）=====
+
+# 总开关
+ENABLE_COMPACT = True
+
+# 模型上下文窗口大小（token）——deepseek-chat 是 128K
+CONTEXT_WINDOW = 128000
+
+# 用量达到窗口的百分之多少时，自动压缩上下文（0.7 = 70%）
+COMPACT_THRESHOLD_RATIO = 0.7
+
+# 压缩后保留最近多少条消息（更早的合并成一段摘要）
+KEEP_RECENT_MESSAGES = 12
+
 # 网页服务端口（如果启动时提示端口被占用，把 8000 改成 8001 再试）
 PORT = 8000
