@@ -26,8 +26,8 @@ API_KEY = ""
 # 以后想换成其他家的大模型，改这一行就行）
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 
-# 用哪个模型：deepseek-chat（通用对话） / deepseek-reasoner（推理模型）
-MODEL = "deepseek-chat"
+# 用哪个模型：deepseek-flash（快速、1M 上下文）/ deepseek-v4-pro（更强，同样 1M）
+MODEL = "deepseek-flash"
 
 # 系统提示词：给 AI 定人设的地方，随便改
 SYSTEM_PROMPT = "你是一个友好的 AI 助手，用简体中文回答问题，回答尽量简洁。"
@@ -45,8 +45,8 @@ MAX_TOOL_ROUNDS = 8
 # 总开关
 ENABLE_COMPACT = True
 
-# 模型上下文窗口大小（token）——deepseek-chat 是 128K
-CONTEXT_WINDOW = 128000
+# 模型上下文窗口大小（token）——deepseek-flash 是 1M（100 万）
+CONTEXT_WINDOW = 1000000
 
 # 用量达到窗口的百分之多少时，自动压缩上下文（0.7 = 70%）
 COMPACT_THRESHOLD_RATIO = 0.7

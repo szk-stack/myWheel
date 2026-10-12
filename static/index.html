@@ -1130,7 +1130,8 @@ function renderSidebar() {
 // ============================================================
 
 // 后端配置（窗口大小、压缩阈值等）——init 时从 /api/state 拉取
-let contextConfig = { window: 128000, threshold_ratio: 0.7, keep_recent: 12, enabled: true };
+// （这里的默认值只是"还没拿到后端配置"时的兜底，按 deepseek-flash 的 1M 窗口）
+let contextConfig = { window: 1000000, threshold_ratio: 0.7, keep_recent: 12, enabled: true };
 
 // 粗略估算：汉字约 0.6 token/字，其他字符约 0.25 token/个，每条消息 +4
 function estimateTokens(messages) {
