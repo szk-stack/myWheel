@@ -81,6 +81,7 @@ def load_state():
                 "id": event["id"],
                 "title": event.get("title", "新对话"),
                 "messages": [],
+                "workspace": None,   # 工作区（None = 默认项目目录）
             })
 
         elif etype == "message":
@@ -105,6 +106,13 @@ def load_state():
                     "result": event.get("result"),
                     "ok": event.get("ok", True),
                 })
+
+        elif etype == "workspace":
+            # 设定会话的工作区（agent 能在哪个目录里干活）
+            # path 为 null 表示恢复默认（项目目录）
+            conv = _find(conversations, event.get("conversation_id"))
+            if conv is not None:
+                conv["workspace"] = event.get("path")
 
         elif etype == "rename":
             # 会话改名

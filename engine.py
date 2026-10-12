@@ -51,8 +51,12 @@ def chat(messages):
     return ctx["reply"]
 
 
-def chat_stream(messages):
+def chat_stream(messages, workspace=None):
     """流式版对话流程（生成器）。
+
+    参数 workspace：本次对话的工作区目录（None = 默认项目目录）——
+    由用户在前端设定、随请求传进来；注意：模型没有权力改它，
+    它只是被锁在工作区里干活的人。
 
     ★ 这次升级成了"agent 循环"——从"一问一答"变成"多轮干活"：
 
@@ -74,6 +78,10 @@ def chat_stream(messages):
         "reply": None,
         "meta": {},
     }
+
+    # ★ 第 0 步：先把工作区告诉工具箱——接下来所有工具都被锁在它里面干活
+    #   （用"线程本地"记录：多线程服务器里，不同对话的请求互不串台）
+    toolbox.set_workspace(workspace)
 
     # ① 调模型之前：before_llm 插件照常工作
     hooks.run(hooks.before_llm, ctx)

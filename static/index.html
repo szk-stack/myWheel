@@ -93,9 +93,36 @@
     border-bottom: 1px solid #e4e7ee;
     font-weight: 600;
     color: #333;
+    display: flex;                 /* 左边会话名 + 右边工作区标签 */
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  #titleText {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  #workspaceTag {
+    flex-shrink: 0;                /* 标签不许被压缩（吃过 flex 压缩的亏，见 #chat 那条注释） */
+    font-size: 12px;
+    font-weight: normal;
+    color: #888;
+    background: #f3f5fa;
+    border: 1px solid #e4e7ee;
+    border-radius: 999px;          /* 胶囊形状 */
+    padding: 3px 12px;
+    cursor: pointer;
+    user-select: none;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #workspaceTag:hover {
+    border-color: #4a7cff;
+    color: #3b6ae8;
+    background: #eef3ff;
   }
   #chat {
     flex: 1;
@@ -289,7 +316,10 @@
 
   <!-- ===== 右侧：聊天主区域 ===== -->
   <main id="main">
-    <header id="chatTitle">新对话</header>
+    <header id="chatTitle">
+      <span id="titleText">新对话</span>
+      <span id="workspaceTag" title="点击设置工作区（agent 的干活范围）">工作区：项目目录</span>
+    </header>
     <div id="chat"></div>
     <footer>
       <textarea id="input" rows="1" placeholder="输入消息，按 Enter 发送（Shift+Enter 换行）"></textarea>
@@ -317,6 +347,7 @@
 //              （分支出来的会话会多带 branched_from / branched_at 血缘备注）
 //   message —— 新的一条消息        { type:"message", conversation_id, role, content }
 //   tool    —— 一次工具调用记录    { type:"tool", conversation_id, name, arguments, result, ok }
+//   workspace —— 设定会话的工作区   { type:"workspace", conversation_id, path }（path=null 恢复默认）
 //   rename  —— 会话改名            { type:"rename", id, title }
 //   delete  —— 删除会话            { type:"delete", id }
 //   switch  —— 切换当前会话        { type:"switch", id }
@@ -338,7 +369,8 @@ let thinkingEl = null;   // "思考中…"那个气泡元素（流式回答就"�
 
 // ---------- 先把页面上的元素抓在手里，后面反复要用 ----------
 const convListEl = document.getElementById("convList");
-const chatTitleEl = document.getElementById("chatTitle");
+const titleTextEl = document.getElementById("titleText");      // 标题栏里的会话名
+const workspaceTagEl = document.getElementById("workspaceTag"); // 标题栏里的工作区标签
 const chatBox = document.getElementById("chat");
 const input = document.getElementById("input");
 const btn = document.getElementById("btn");
@@ -466,6 +498,54 @@ async function renameConversation(id) {
   }
 }
 
+// 【设置工作区】这个对话的 agent 能在哪个目录里干活（文件操作全被锁在里面）
+async function setWorkspace() {
+  const conv = currentConv();
+  if (!conv) return;
+
+  const inputValue = prompt(
+    "给这个对话设置工作区（agent 只能在这里面干活）：\n" +
+    "· 输入一个目录路径（不存在会自动创建，连父目录一起建）\n" +
+    "· 新建沙箱：输入一个名字（如 练习1），会在 sandboxes/练习1 建新目录\n" +
+    "· 留空 = 恢复默认（项目目录）",
+    conv.workspace || ""
+  );
+  if (inputValue === null) return;         // 点了取消
+  const path = inputValue.trim();
+
+  // 留空 = 恢复默认
+  if (path === "") {
+    conv.workspace = null;
+    await appendEvents([{ type: "workspace", conversation_id: conv.id, path: null }]);
+    renderAll();
+    return;
+  }
+
+  // 交给后端校验/创建（浏览器的 JS 摸不到本地文件系统，这类事必须问后端）
+  try {
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: path }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert("设置失败：" + data.error);
+      return;
+    }
+
+    // 成功：记进事件日志（刷新后还记得）
+    conv.workspace = data.path;
+    await appendEvents([{ type: "workspace", conversation_id: conv.id, path: data.path }]);
+    renderAll();
+    if (data.created) alert("已为你新建工作区目录：\n" + data.path);
+
+  } catch (err) {
+    alert("连接后端失败，请确认 server.py 正在运行");
+  }
+}
+
 // 【分支】以某条 AI 回复为界，复制出一个新会话（学 Pi 的 /fork）
 // 原理：把"从开头到这条回复"的消息复制成新事件，追加进日志；
 //       原会话一动不动，新会话拿到一份完全属于自己的历史副本。
@@ -571,7 +651,7 @@ async function sendMessage() {
     const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: historyForModel }),
+      body: JSON.stringify({ messages: historyForModel, workspace: conv.workspace || null }),
     });
     if (!res.ok || !res.body) {
       throw new Error("服务未就绪（HTTP " + res.status + "），请重启 server.py 后再试");
@@ -750,12 +830,23 @@ function renderSidebar() {
   });
 }
 
+// 路径太长时缩短显示（只影响界面，不影响真实路径）
+function shortenPath(p) {
+  if (p.length <= 32) return p;
+  return "…" + p.slice(-28);
+}
+
 // ---------- 渲染右侧的消息区 ----------
 function renderMessages() {
   const conv = currentConv();
 
-  // 标题栏显示当前会话的名字
-  chatTitleEl.textContent = conv ? conv.title : "新对话";
+  // 标题栏：左边是会话名，右边是工作区标签
+  titleTextEl.textContent = conv ? conv.title : "新对话";
+  const ws = conv ? conv.workspace : null;
+  workspaceTagEl.textContent = "工作区：" + (ws ? shortenPath(ws) : "项目目录");
+  workspaceTagEl.title = ws
+    ? "当前工作区：" + ws + "（点击修改）"
+    : "默认工作区：项目目录（点击修改）";
 
   chatBox.innerHTML = "";       // 同样先清空
 
@@ -891,6 +982,7 @@ async function init() {
 
 // ---------- 事件绑定 ----------
 newBtn.addEventListener("click", createConversation);
+workspaceTagEl.addEventListener("click", setWorkspace);
 btn.addEventListener("click", sendMessage);
 input.addEventListener("keydown", function (e) {
   if (e.key === "Enter" && !e.shiftKey) {

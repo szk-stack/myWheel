@@ -11,6 +11,7 @@ server.py —— 启动入口（用这个文件启动整个项目）
      - 聊天（普通）                （POST /api/chat）         → 交给 engine 处理
      - 聊天（流式）                （POST /api/chat/stream）  → 边收边发，打字机效果
      - 追加事件                    （POST /api/events）       → storage 往日志末尾写（只追加，不重写）
+     - 设置工作区                  （POST /api/workspace）    → 校验并创建目录（agent 的活动范围）
 """
 
 import json
@@ -77,6 +78,14 @@ class ChatHandler(BaseHTTPRequestHandler):
             # ---- 流式聊天接口：边收边发（打字机效果）----
             self._handle_chat_stream(data)
 
+        elif self.path == "/api/workspace":
+            # ---- 工作区接口：校验一个目录（不存在就创建），供界面设置工作区用 ----
+            try:
+                path, created = toolbox.prepare_workspace(data.get("path", ""))
+                self._send_json(200, {"ok": True, "path": path, "created": created})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+
         elif self.path == "/api/events":
             # ---- 事件接口：把前端发来的一批事件追加到日志末尾 ----
             try:
@@ -101,7 +110,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             # 边收边发：engine.chat_stream 是生成器，它吐出的本来就是
             # "事件字典"（文字增量 / 工具调用 / 工具结果），原样转发给浏览器，
             # 前端按里面的 type 字段分别处理
-            for event in engine.chat_stream(data.get("messages", [])):
+            # 注意：把前端传来的"工作区"一并交给引擎（None = 默认项目目录）
+            for event in engine.chat_stream(data.get("messages", []), workspace=data.get("workspace")):
                 self._send_sse(event)
             self._end_sse()
         except Exception as e:
