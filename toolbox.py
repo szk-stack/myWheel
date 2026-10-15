@@ -127,6 +127,36 @@ def prepare_workspace(path):
     return str(p), created
 
 
+# ============================================================
+# 工具禁用名单（子代理防"套娃"用）
+# ------------------------------------------------------------
+# 子代理干活期间，它的工具箱里不该再出现 spawn_agent——
+# 不然它可能自己再派子代理、层层嵌套（烧钱无底洞）。
+# 和"工作区"一样用线程本地：只影响正在跑子代理的那一个线程，
+# 其他对话（其他线程）不受任何影响。
+# ============================================================
+
+def set_disabled(names):
+    """设置"本线程要禁用哪些工具"，返回修改前的名单（用于之后恢复）。
+
+    传一个集合（如 {"spawn_agent"}）；传空集合或 None 表示"取消禁用"。
+    典型用法（照抄 spawn_agent 工具里的写法）：
+        old = set_disabled({"spawn_agent"})
+        try:
+            ...干活...
+        finally:
+            set_disabled(old)      # 干完必须恢复（用 finally 保证）
+    """
+    prev = getattr(_local, "disabled", None)
+    _local.disabled = set(names) if names else set()
+    return prev
+
+
+def disabled_names():
+    """读取本线程当前的禁用名单（返回一个集合，没设置过就是空集合）。"""
+    return getattr(_local, "disabled", None) or set()
+
+
 def register(description, run, source="builtin"):
     """登记一个工具（每个工具文件在末尾调用它）。
 
@@ -156,10 +186,15 @@ def all_descriptions():
       这个"内部格式 → API 格式"的转换层就固定放在这里——
       将来接 MCP 时也一样：远端工具的格式先转换成本地格式，
       到这里再统一包一层，引擎不用关心工具从哪来。
+
+    ★ 禁用名单里的工具不会出现在这里——子代理"看不到"被禁的工具
+      （看不见就不会用，这是防套娃的第一道门）。
     """
+    disabled = disabled_names()
     return [
         {"type": "function", "function": item["description"]}
-        for item in _registry.values()
+        for name, item in _registry.items()
+        if name not in disabled
     ]
 
 
@@ -180,6 +215,11 @@ def call(name, arguments):
     """
     if name not in _registry:
         return f"错误：没有叫「{name}」的工具"
+
+    # 禁用名单再拦一道：即使模型"硬要调"被禁的工具，也不给执行
+    # （防套娃的第二道门——第一道是它的说明书根本不发给模型）
+    if name in disabled_names():
+        return f"错误：工具「{name}」当前不可用"
 
     # 路过预留的"工具执行前"空槽（将来的权限确认、审计插件挂在这里）
     ctx = {"name": name, "arguments": arguments, "blocked": None}

@@ -86,7 +86,7 @@ def _convert_tool_history(messages):
     return out
 
 
-def chat_stream(messages, workspace=None, compaction=None):
+def chat_stream(messages, workspace=None, compaction=None, skip_persona=False):
     """流式版对话流程（生成器）。
 
     参数 workspace：本次对话的工作区目录（None = 默认项目目录）——
@@ -95,6 +95,10 @@ def chat_stream(messages, workspace=None, compaction=None):
 
     参数 compaction：会话的上下文压缩状态（{"summary", "first_kept_index"} 或 None）
     —— 由前端随请求带来，放进 ctx["meta"] 供 compact 插件使用。
+
+    参数 skip_persona：跳过"项目人设"（默认 False）。
+    —— 子代理（spawn_agent 工具）用它：子代理有自己的专门人设
+    （config.SUBAGENT_PROMPT），不希望项目人设再混进去。
 
     ★ 这次升级成了"agent 循环"——从"一问一答"变成"多轮干活"：
 
@@ -124,6 +128,10 @@ def chat_stream(messages, workspace=None, compaction=None):
     # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
     #   "应用"已有的压缩（切成"摘要 + 最近消息"）
     ctx["meta"]["compaction"] = compaction
+
+    # ★ 第 0.6 步：把"跳过项目人设"标记放进数据袋——
+    #   system_prompt 插件看到它就收手（子代理自带人设）
+    ctx["meta"]["skip_persona"] = skip_persona
 
     # ① 调模型之前：before_llm 插件照常工作
     #    （其中 compact 插件可能在这里做"上下文压缩"——它会应用旧压缩，

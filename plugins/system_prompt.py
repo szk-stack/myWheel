@@ -11,6 +11,10 @@ from hooks import before_llm
 
 def add_system_prompt(ctx):
     """把系统提示词插到消息列表的最前面。"""
+    # 打了"跳过项目人设"标记的场合（比如子代理——它自带专门人设）：不动
+    if ctx["meta"].get("skip_persona"):
+        return
+
     messages = ctx["messages"]
 
     # 用"内容"判断人设是否已经插过（而不是只看第一条是不是 system）——
