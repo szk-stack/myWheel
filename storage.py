@@ -106,6 +106,8 @@ def load_state():
                     "arguments": event.get("arguments"),
                     "result": event.get("result"),
                     "ok": event.get("ok", True),
+                    # 附加数据（比如子代理的完整过程）；老记录没有这个字段，就是 None
+                    "extra": event.get("extra"),
                 })
 
         elif etype == "workspace":

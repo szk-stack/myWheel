@@ -15,7 +15,7 @@ config.py
 .workbuddy/
 
 # ===== 临时测试文件 =====
-_test_*.py
+_test_*
 _check.js
 
 # ===== 沙箱目录（agent 的练习场，不进版本库）=====

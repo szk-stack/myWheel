@@ -367,6 +367,53 @@
   }
   .tool-card.open .tool-card-body { display: block; }
   .tool-card.fail .tool-card-head { color: #c0392b; }
+  /* 带子代理过程的卡片：body 放宽限高（要装得下"报告 + 过程面板"） */
+  .tool-card.has-subagent .tool-card-body { max-height: 560px; }
+
+  /* ===== 子代理过程（spawn_agent 卡片里的"展开看过程"） ===== */
+  .subagent-area {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #d8cdf0;
+  }
+  .subagent-toggle {
+    font-family: inherit;
+    font-size: 12px;
+    color: #5a4a9a;
+    background: #f3f0fa;
+    border: 1px solid #ddd3f0;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .subagent-toggle:hover { background: #ece7f8; }
+  .subagent-panel {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 3px solid #b9a7e8;
+    background: #faf9ff;
+    border-radius: 0 6px 6px 0;
+    /* 覆盖 tool-card-body 的等宽字体/预排版，恢复普通样式 */
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    white-space: normal;
+    word-break: normal;
+    max-height: 380px;
+    overflow-y: auto;
+  }
+  .subagent-panel.hidden { display: none; }
+  .subagent-task {
+    font-size: 12px;
+    color: #6b5aa0;
+    font-weight: 500;
+    margin: 4px 0 8px;
+  }
+  .subagent-text {
+    font-size: 13px;
+    color: #444;
+    margin: 8px 0;
+  }
+  .subagent-text p { margin: 4px 0; }
+  .subagent-panel .tool-card { max-width: 100%; }
 
   /* ===== 压缩卡片（消息区顶部："早期对话已合并为摘要"） ===== */
   .compact-card {
@@ -975,7 +1022,14 @@ async function sendMessage() {
           // 加一行临时状态（追加在时间线末尾，顺序自然正确）
           const lineEl = document.createElement("div");
           lineEl.className = "tool-line";
-          lineEl.textContent = "正在调用工具 " + msg.name + " …";
+          if (msg.name === "spawn_agent" && msg.arguments && msg.arguments.task) {
+            // 子代理可能要跑一阵子：把"派了什么活"亮出来，别让人干等
+            const t = String(msg.arguments.task);
+            lineEl.textContent = "子代理出动，正在干活…（任务：" +
+              (t.length > 60 ? t.slice(0, 60) + "…" : t) + "）";
+          } else {
+            lineEl.textContent = "正在调用工具 " + msg.name + " …";
+          }
           chatBox.appendChild(lineEl);
           toolLines.push(lineEl);
           chatBox.scrollTop = chatBox.scrollHeight;
@@ -992,6 +1046,7 @@ async function sendMessage() {
             arguments: msg.arguments,
             result: msg.result,
             ok: msg.ok,
+            extra: msg.extra || null,   // ★ 附加数据（子代理的完整过程）
           });
           chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -1025,6 +1080,7 @@ async function sendMessage() {
           arguments: seg.arguments,
           result: seg.result,
           ok: seg.ok,
+          extra: seg.extra || null,
         });
       }
     });
@@ -1047,6 +1103,7 @@ async function sendMessage() {
           arguments: seg.arguments,
           result: seg.result,
           ok: seg.ok,
+          extra: seg.extra || null,
         });
       }
     });
@@ -1300,7 +1357,7 @@ function addBubble(role, text, branchInfo) {
 // ---------- 把一条"工具记录"做成灰色小卡片 ----------
 // 点击卡片头部可以展开/收起完整结果
 // （"默认折叠、想看了再展开"这个交互学自 Pi 的 Ctrl+O）
-function addToolCard(tool) {
+function addToolCard(tool, parent) {
   const card = document.createElement("div");
   card.className = "tool-card" + (tool.ok ? "" : " fail");
 
@@ -1317,6 +1374,13 @@ function addToolCard(tool) {
   body.className = "tool-card-body";
   body.textContent = tool.result || "";
 
+  // ★ 子代理的卡片：结果下面再挂一块"完整过程"（默认收起）
+  //   数据来自 extra.subagent——子代理的完整对话时间线
+  if (tool.extra && tool.extra.subagent) {
+    card.classList.add("has-subagent");   // 让这类卡片的 body 放宽限高
+    body.appendChild(buildSubagentArea(tool.extra.subagent));
+  }
+
   // 点头部切换展开/收起
   head.addEventListener("click", function () {
     card.classList.toggle("open");
@@ -1324,8 +1388,56 @@ function addToolCard(tool) {
 
   card.appendChild(head);
   card.appendChild(body);
-  chatBox.appendChild(card);
-  chatBox.scrollTop = chatBox.scrollHeight;
+  // parent 用来"嵌套摆放"（子代理过程里的工具行会挂进过程面板）；
+  // 不传就放在主消息区（原有的用法）
+  (parent || chatBox).appendChild(card);
+  if (!parent) chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+// ---------- 子代理的"完整过程"区（挂在 spawn_agent 的工具卡片里） ----------
+// 数据是子代理的完整对话时间线：任务 → 中间文字/工具调用 → 结论
+// （由 spawn_agent 在 extra.subagent.messages 里带回，跟着日志走、刷新后还在）
+function buildSubagentArea(sub) {
+  const area = document.createElement("div");
+  area.className = "subagent-area";
+
+  const msgs = sub.messages || [];
+
+  const toggle = document.createElement("button");
+  toggle.className = "subagent-toggle";
+  toggle.textContent = "展开子代理过程（" + msgs.length + " 条记录）";
+
+  const panel = document.createElement("div");
+  panel.className = "subagent-panel hidden";
+
+  msgs.forEach(function (m) {
+    if (m.role === "user") {
+      // 任务描述
+      const el = document.createElement("div");
+      el.className = "subagent-task";
+      el.textContent = "任务：" + (m.content || "");
+      panel.appendChild(el);
+    } else if (m.role === "assistant") {
+      // 子代理说的话（和主消息一样走 Markdown 渲染）
+      const el = document.createElement("div");
+      el.className = "subagent-text";
+      el.innerHTML = renderMarkdown(m.content || "");
+      panel.appendChild(el);
+    } else if (m.role === "tool") {
+      // 子代理的工具调用：复用工具卡片（嵌套进过程面板）
+      addToolCard(m, panel);
+    }
+  });
+
+  toggle.addEventListener("click", function () {
+    const isHidden = panel.classList.toggle("hidden");
+    toggle.textContent = (isHidden ? "展开" : "收起") +
+      "子代理过程（" + msgs.length + " 条记录）";
+  });
+
+  area.appendChild(toggle);
+  area.appendChild(panel);
+  return area;
 }
 
 // ---------- 压缩卡片：表示"之前的历史已合并为摘要" ----------

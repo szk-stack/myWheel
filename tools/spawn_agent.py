@@ -49,6 +49,19 @@ DESCRIPTION = {
 }
 
 
+# 记账副本里单条文本的长度上限（超过就截断）——
+# 这是"日志大小保险"：万一子代理读了个超大文件，别让日志被撑爆
+_SUB_LOG_TEXT_LIMIT = 3000
+
+
+def _slim(text):
+    """给"记账副本"里的长文本瘦身：超长就截断，并注明原文长度。"""
+    text = text or ""
+    if len(text) <= _SUB_LOG_TEXT_LIMIT:
+        return text
+    return text[:_SUB_LOG_TEXT_LIMIT] + f"\n…（已截断，原文共 {len(text)} 字符）"
+
+
 # ---- ② 执行函数（模型点名时真正运行）----
 def run(arguments):
     """派一个子代理干活：跑完一整段"迷你对话"，把结论带回来。"""
@@ -66,6 +79,11 @@ def run(arguments):
     # ★ 防套娃：子代理干活期间，把 spawn_agent 自己禁用掉——
     #   小弟不能再招小弟（不然可能无限套娃、烧钱无底洞）
     old_disabled = toolbox.set_disabled({"spawn_agent"})
+
+    # 子对话的"记账副本"（不发给模型，纯给人看）：
+    # 按真实时间线记下 任务 → 过程 → 结论，最后随工具结果一起
+    # 交给前端和日志——界面上"展开子代理过程"看的就是它
+    sub_log = [{"role": "user", "content": task}]
 
     text_buf = ""        # 正在累积的这一段文字
     final_answer = ""    # 最终结论（最后一段文字）
@@ -88,17 +106,38 @@ def run(arguments):
                 # 要调工具了：把刚攒的文字"封段"（那多半是过程话）
                 if text_buf:
                     final_answer = text_buf
+                    sub_log.append({"role": "assistant", "content": _slim(text_buf)})
                     text_buf = ""
                 tool_names.append(event["name"])
-            # 其他事件（tool_result 等）子代理内部消化，不需要往外传
+            elif event["type"] == "tool_result":
+                # 子代理的每次工具调用也照进"记账副本"（和主对话的格式一致）
+                sub_log.append({
+                    "role": "tool",
+                    "name": event["name"],
+                    "arguments": event["arguments"],
+                    "ok": event["ok"],
+                    "result": _slim(event["result"]),
+                })
 
         # 循环正常结束：最后一段没封段的文字 = 子代理的最终结论
         if text_buf:
             final_answer = text_buf
+            sub_log.append({"role": "assistant", "content": _slim(text_buf)})
 
     finally:
         # 不管中途出没出错，都必须把禁用名单恢复（主对话还要继续用）
         toolbox.set_disabled(old_disabled)
+
+    # ★ 把"子代理的完整过程"捎给上层：它会随工具结果流向对前端和日志，
+    #   界面上点开工具卡片就能"展开子代理过程"
+    #   （失败时也带上——出问题了更需要看过程来排查）
+    toolbox.attach({
+        "subagent": {
+            "task": task,
+            "messages": sub_log,       # 完整时间线（含每次工具调用和结果）
+            "tool_calls": tool_names,  # 原始调用序列
+        }
+    })
 
     if not final_answer:
         # 兜底：子代理什么都没说（罕见——多半是中途出错了）

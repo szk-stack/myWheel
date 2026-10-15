@@ -208,14 +208,21 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False):
 
             result = toolbox.call(call["name"], arguments)   # ★ 真正执行！
 
+            # 取走这次工具"捎带的附件"（比如子代理的完整对话记录）——
+            # 它会跟着 tool_result 一起流向对前端和日志
+            extra = toolbox.take_attachments()
+
             # 告诉外面："执行完了"（前端用来显示结果、并记账）
-            yield {
+            event = {
                 "type": "tool_result",
                 "name": call["name"],
                 "arguments": arguments,
                 "ok": not result.startswith("错误"),
                 "result": result,
             }
+            if extra:
+                event["extra"] = extra
+            yield event
 
             # 按官方协议把结果塞回工作历史（role=tool + 对应的 tool_call_id）
             work_messages.append({

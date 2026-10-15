@@ -157,6 +157,31 @@ def disabled_names():
     return getattr(_local, "disabled", None) or set()
 
 
+# ============================================================
+# 工具"附件"（随结果捎带给上层的数据）
+# ------------------------------------------------------------
+# 工具平时只返回一个字符串（给模型看的结果）；但有时还想捎带一些
+# "结构化数据"给界面和日志用——比如 spawn_agent 想把子代理的完整
+# 对话（几十条记录）带回去，前端才能"展开看过程"。
+# 全塞进那个字符串里太丑，所以设计了这个小机制：
+#   ① 工具执行期间调 attach(data) 挂一份数据；
+#   ② engine 执行完这个工具后调 take_attachments() 取走；
+#   ③ 数据跟着 tool_result 事件流向对前端、写进事件日志。
+# 同样是线程本地（一个线程同一时刻只跑一个工具，不会串台）。
+# ============================================================
+
+def attach(data):
+    """给"当前这一次工具执行"捎带一份结构化数据（见上方说明）。"""
+    _local.attachments = data
+
+
+def take_attachments():
+    """取走本线程的附件并清空（engine 每次工具执行后取一次）。"""
+    data = getattr(_local, "attachments", None)
+    _local.attachments = None
+    return data
+
+
 def register(description, run, source="builtin"):
     """登记一个工具（每个工具文件在末尾调用它）。
 
