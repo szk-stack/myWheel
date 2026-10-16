@@ -29,8 +29,8 @@
 |---|---|---|
 | [architecture.md](architecture.md) | 架构总览：模块划分、核心机制、关键流程 | **Stable** |
 | [modules/llm/](modules/llm/README.md) | 模块：模型接入（流式解析、工具调用协议） | **Stable** |
-| modules/engine/ | 模块：引擎（agent 循环、事件流） | 规划中 |
-| modules/storage/ | 模块：存储（事件日志、回放推导） | 规划中 |
+| [modules/engine/](modules/engine/README.md) | 模块：引擎（agent 循环、事件流） | **Stable** |
+| [modules/storage/](modules/storage/README.md) | 模块：存储（事件日志、回放推导） | **Stable** |
 | modules/toolbox/ | 模块：工具箱（注册表、工作区、禁用名单、附件槽） | 规划中 |
 | modules/tools/ | 模块：工具系统（总览 + 每个工具一页） | 规划中 |
 | modules/plugins/ | 模块：插件系统（空槽机制 + 每个插件一页） | 规划中 |
@@ -44,7 +44,7 @@
 **推进计划**（分批交付，每批都是完整可用的状态）：
 
 - [x] 第 1 批：docs 骨架 + 模板 + 架构总览 + llm 样张
-- [ ] 第 2 批：engine、storage
+- [x] 第 2 批：engine、storage
 - [ ] 第 3 批：toolbox、tools、plugins
 - [ ] 第 4 批：server、frontend
 - [ ] 收尾批：api/、data/、adr/、ops/runbook、CHANGELOG

@@ -68,13 +68,13 @@ flowchart TB
 | 模块 | 文件 | 一句话职责 | 模块文档 |
 |---|---|---|---|
 | 启动入口 | `server.py` | HTTP 服务：路由、SSE 流式、静态文件、工作区对话框 | 规划中 |
-| 引擎 | `engine.py` | agent 循环：串起"调模型 ⇄ 执行工具"，转发事件流 | 规划中 |
+| 引擎 | `engine.py` | agent 循环：串起"调模型 ⇄ 执行工具"，转发事件流 | [modules/engine](modules/engine/README.md) |
 | 模型接入 | `llm.py` | 和 DeepSeek 说话：流式解析、工具调用协议 | [modules/llm](modules/llm/README.md) |
 | 工具箱 | `toolbox.py` | 工具注册表 + 调度 + 工作区管理 + 禁用名单 + 附件槽 | 规划中 |
 | 工具集 | `tools/` | 文件即工具：list_dir / read_file / write_file / edit_file / spawn_agent | 规划中 |
 | 插件 | `plugins/` | 挂在空槽上的功能：system_prompt / compact / logger | 规划中 |
 | 空槽 | `hooks.py` | 三个函数列表 + 调度器（整个扩展机制的地基） | 规划中 |
-| 存储 | `storage.py` | 事件日志：追加事件 + 回放推导状态 | 规划中 |
+| 存储 | `storage.py` | 事件日志：追加事件 + 回放推导状态 | [modules/storage](modules/storage/README.md) |
 | 配置 | `config.py` | 全部可调参数（Key / 模型 / 阈值 / 开关） | 规划中 |
 | 前端 | `static/index.html` | 单页应用：状态驱动渲染、流式打字机、全部界面逻辑 | 规划中 |
 
@@ -105,7 +105,8 @@ flowchart TB
 - 事件类型（8 种）：`session` / `message` / `tool` / `workspace` / `compact` / `rename` / `delete` / `switch`。
 - 删除是"逻辑删除"：日志里的旧行不动，只是回放时忽略。
 - 未知事件类型直接跳过——**天然向前兼容**（旧代码读新日志不会崩）。
-- 详细字段表见 `data/event-log.md`（规划中）。
+- 详细字段表见 [modules/storage](modules/storage/README.md)（§4.2）；
+  独立的事件字典 `data/event-log.md` 规划中。
 
 ### 4.3 Agent 循环（心脏）
 
@@ -120,7 +121,7 @@ flowchart TB
 - 保险丝：连续工具轮数超过 `MAX_TOOL_ROUNDS`（config）就停，防死循环烧钱。
 - 流式产出的事件（路由到前端）：`text` / `tool_call` / `tool_result` / `compacted`。
 - 历史里的工具记录发给模型前会转成标准协议对（`assistant(tool_calls)` + `tool`），
-  这样模型"记得"自己读过什么（`_convert_tool_history()`）。
+  这样模型"记得"自己读过什么（细节见 [modules/engine](modules/engine/README.md) §4.4）。
 
 ### 4.4 工具体系（手脚）
 
