@@ -18,5 +18,5 @@ config.py
 _test_*
 _check.js
 
-# ===== 沙箱目录（agent 的练习场，不进版本库）=====
-sandboxes/
+# ===== 沙箱目录（agent 的练习场 + 各任务的默认工作区，不进版本库）=====
+sandbox/

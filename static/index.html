@@ -621,7 +621,7 @@
         <div id="workspaceMenu" class="hidden">
           <button data-action="pick">浏览选择文件夹…</button>
           <button data-action="manual">手动输入路径…</button>
-          <button data-action="reset">恢复默认（项目目录）</button>
+          <button data-action="reset">项目目录（agent 直接改项目文件）</button>
         </div>
 
         <!-- 上下文用量计量（点击弹出详情 + 手动压缩）-->
@@ -757,6 +757,26 @@ function renderMarkdown(text) {
 // 三、四个操作：新建 / 切换 / 删除 / 重命名
 // ============================================================
 
+// 给新对话生成默认工作区的名字：形如 2026-10-16-20-56（年-月-日-时-分）
+// （后端会把"纯名字"补全成 <项目>/sandbox/<名字> 并创建目录）
+// 同一分钟内连开多个对话时，自动加 -2、-3 后缀，避免撞名
+function timestampWorkspaceName() {
+  const d = new Date();
+  const p = function (n) { return String(n).padStart(2, "0"); };
+  const base = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+    "-" + p(d.getHours()) + "-" + p(d.getMinutes());
+  const inUse = function (name) {
+    return state.conversations.some(function (c) {
+      const w = c.workspace || "";
+      return w.endsWith("sandbox\\" + name) || w.endsWith("sandbox/" + name);
+    });
+  };
+  let name = base;
+  let i = 2;
+  while (inUse(name)) { name = base + "-" + i; i++; }
+  return name;
+}
+
 // 【新建】造一个新会话，插到列表最前面，然后切过去
 async function createConversation() {
   const conv = {
@@ -767,11 +787,30 @@ async function createConversation() {
   state.conversations.unshift(conv);   // unshift：插到数组最前面
   state.current_id = conv.id;
 
-  // 记忆方式：把"新建"和"切换过去"记成两条事件，追加到日志
-  await appendEvents([
-    { type: "session", id: conv.id, title: conv.title },
-    { type: "switch", id: conv.id },
-  ]);
+  // 记忆方式：把"新建 + 默认工作区 + 切换"记成事件，追加到日志
+  const events = [{ type: "session", id: conv.id, title: conv.title }];
+
+  // ★ 给新对话自动分配"默认工作区"：sandbox/<时间戳>（如 sandbox/2026-10-16-20-56）
+  //   这样每个任务默认就有自己的独立沙箱、不会直接动项目文件；
+  //   想让 agent 直接在项目里干活，用工作区菜单切"项目目录"。
+  //   （分配失败——比如后端没启动——就降级：该对话按"项目目录"处理）
+  try {
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: timestampWorkspaceName() }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      conv.workspace = data.path;
+      events.push({ type: "workspace", conversation_id: conv.id, path: data.path });
+    }
+  } catch (err) {
+    console.warn("默认工作区分配失败（后端没启动？）：", err);
+  }
+  events.push({ type: "switch", id: conv.id });
+
+  await appendEvents(events);
 
   renderAll();
   input.focus();           // 光标自动跳到输入框，马上能打字
@@ -826,10 +865,11 @@ async function renameConversation(id) {
 
 // ============================================================
 // 【工作区设置】这个对话的 agent 能在哪个目录里干活。
-// 入口在输入框上方的小标签，点它有三种方式：
+// 新对话会自动分配默认工作区（sandbox/<时间戳>，见 createConversation）；
+// 入口在输入框上方的小标签，点它可以切换：
 //   ① 浏览选择（弹系统"选择文件夹"对话框——和上传文件选路径一样）
 //   ② 手动输入（备用；还支持"纯名字建沙箱"的快捷方式）
-//   ③ 恢复默认（项目目录）
+//   ③ 项目目录（让 agent 直接在项目里干活）
 // ============================================================
 
 // 点标签：开/关工作区小菜单（和上下文面板互斥）
@@ -876,8 +916,8 @@ async function manualWorkspace() {
   const inputValue = prompt(
     "手动输入工作区路径（agent 只能在这里面干活）：\n" +
     "· 输入一个目录路径（不存在会自动创建，连父目录一起建）\n" +
-    "· 新建沙箱：输入一个名字（如 练习1），会在 sandboxes/练习1 建新目录\n" +
-    "· 留空 = 恢复默认（项目目录）",
+    "· 新建沙箱：输入一个名字（如 练习1），会在 sandbox/练习1 建新目录\n" +
+    "· 留空 = 使用项目目录",
     conv.workspace || ""
   );
   if (inputValue === null) return;
@@ -890,7 +930,7 @@ async function manualWorkspace() {
   await applyWorkspace(path);
 }
 
-// 【方式③】恢复默认（项目目录）
+// 【方式③】切到项目目录（让 agent 直接改项目文件）
 async function resetWorkspace() {
   const conv = currentConv();
   if (!conv) return;

@@ -32,7 +32,9 @@ import hooks
 _registry = {}
 
 # 项目根目录（toolbox.py 所在的文件夹）。
-# "纯名字沙箱"（用户只输入一个名字时）会建在它的 sandboxes/ 子目录下。
+# 沙箱都建在它的 sandbox/ 子目录下：
+#   - 纯名字（如 "练习1"）           → sandbox/练习1
+#   - 新对话自动分配的默认工作区       → sandbox/2026-10-16-20-56（时间戳）
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
@@ -102,9 +104,10 @@ def prepare_workspace(path):
     raw = path.strip()
 
     # 小贴心：只输入一个"名字"（没有路径分隔符）→ 当作"在项目下新建沙箱"，
-    # 自动补全成 <项目目录>/sandboxes/<名字>
+    # 自动补全成 <项目目录>/sandbox/<名字>
+    # （新对话的"默认工作区"也走这条路：名字就是时间戳，如 2026-10-16-20-56）
     if not any(ch in raw for ch in ("/", "\\", ":")):
-        raw = str(PROJECT_ROOT / "sandboxes" / raw)
+        raw = str(PROJECT_ROOT / "sandbox" / raw)
 
     p = Path(raw).resolve()
 
@@ -119,7 +122,7 @@ def prepare_workspace(path):
     created = False
     if not p.exists():
         try:
-            p.mkdir(parents=True)   # 连父目录一起创建（比如新建 sandboxes/xxx）
+            p.mkdir(parents=True)   # 连父目录一起创建（比如新建 sandbox/xxx）
             created = True
         except OSError as e:
             raise ValueError(f"目录创建失败：{e}")
