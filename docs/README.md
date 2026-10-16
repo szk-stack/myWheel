@@ -31,9 +31,9 @@
 | [modules/llm/](modules/llm/README.md) | 模块：模型接入（流式解析、工具调用协议） | **Stable** |
 | [modules/engine/](modules/engine/README.md) | 模块：引擎（agent 循环、事件流） | **Stable** |
 | [modules/storage/](modules/storage/README.md) | 模块：存储（事件日志、回放推导） | **Stable** |
-| modules/toolbox/ | 模块：工具箱（注册表、工作区、禁用名单、附件槽） | 规划中 |
-| modules/tools/ | 模块：工具系统（总览 + 每个工具一页） | 规划中 |
-| modules/plugins/ | 模块：插件系统（空槽机制 + 每个插件一页） | 规划中 |
+| [modules/toolbox/](modules/toolbox/README.md) | 模块：工具箱（注册表、工作区、禁用名单、附件槽） | **Stable** |
+| [modules/tools/](modules/tools/README.md) | 模块：工具系统（总览 + 每个工具一页） | **Stable** |
+| [modules/plugins/](modules/plugins/README.md) | 模块：插件系统（空槽机制 + 每个插件一页） | **Stable** |
 | modules/server/ | 模块：HTTP 服务（路由、SSE、静态文件） | 规划中 |
 | modules/frontend/ | 模块：前端（状态驱动渲染、流式显示） | 规划中 |
 | api/http.md · api/sse-events.md | 接口契约（HTTP 接口逐条 / SSE 事件协议） | 规划中 |
@@ -45,7 +45,7 @@
 
 - [x] 第 1 批：docs 骨架 + 模板 + 架构总览 + llm 样张
 - [x] 第 2 批：engine、storage
-- [ ] 第 3 批：toolbox、tools、plugins
+- [x] 第 3 批：toolbox、tools、plugins
 - [ ] 第 4 批：server、frontend
 - [ ] 收尾批：api/、data/、adr/、ops/runbook、CHANGELOG
 
