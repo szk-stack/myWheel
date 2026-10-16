@@ -31,7 +31,7 @@ def chat(messages):
     # 三个键的含义：
     #   messages —— 完整对话历史（插件可以修改它）
     #   reply    —— AI 的回答（调用模型之后才有值）
-    #   meta     —— 插件之间传递临时数据用（现在还没用到）
+    #   meta     —— 插件之间传递临时数据用（如压缩状态、跳过人设标记）
     ctx = {
         "messages": messages,
         "reply": None,

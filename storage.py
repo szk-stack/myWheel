@@ -97,7 +97,8 @@ def load_state():
         elif etype == "tool":
             # 工具调用记录：作为一条 role=tool 的条目放进消息时间线。
             # 前端把它渲染成灰色小卡片（可回溯"agent 当时干了什么"）；
-            # 发给模型前会被过滤掉——它纯粹是"给人看的账本"。
+            # 发给模型前会转成"协议对"（见 engine._convert_tool_history）——
+            # 模型因此"记得"自己读过什么，不用重复读文件。
             conv = _find(conversations, event.get("conversation_id"))
             if conv is not None:
                 conv["messages"].append({
