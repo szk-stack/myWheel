@@ -71,7 +71,7 @@ flowchart TB
 | 引擎 | `engine.py` | agent 循环：串起"调模型 ⇄ 执行工具"，转发事件流 | [modules/engine](modules/engine/README.md) |
 | 模型接入 | `llm.py` | 和 DeepSeek 说话：流式解析、工具调用协议 | [modules/llm](modules/llm/README.md) |
 | 工具箱 | `toolbox.py` | 工具注册表 + 调度 + 工作区管理 + 禁用名单 + 附件槽 | [modules/toolbox](modules/toolbox/README.md) |
-| 工具集 | `tools/` | 文件即工具：list_dir / read_file / write_file / edit_file / spawn_agent | [modules/tools](modules/tools/README.md) |
+| 工具集 | `tools/` | 文件即工具：list_dir / read_file / write_file / edit_file / exec_command / spawn_agent | [modules/tools](modules/tools/README.md) |
 | 插件 | `plugins/` | 挂在空槽上的功能：system_prompt / compact / logger | [modules/plugins](modules/plugins/README.md) |
 | 空槽 | `hooks.py` | 三个函数列表 + 调度器（整个扩展机制的地基） | [modules/plugins](modules/plugins/README.md)（§2） |
 | 存储 | `storage.py` | 事件日志：追加事件 + 回放推导状态 | [modules/storage](modules/storage/README.md) |
@@ -150,6 +150,8 @@ flowchart LR
 （如 `sandbox/2026-10-16-20-56`）作为默认；也可手动切换为任意安全目录（含"项目目录"）：
 
 - 所有文件工具的路径都被 `safe_path()` 锁在工作区内（`../` 越界直接拦）；
+- **例外：`exec_command`**——命令是任意程序，工作区只是它的默认执行目录，
+  路径锁管不到命令内部（危险命令有黑名单兜底：防手滑、不防刻意）；
 - 盘根、用户主目录、系统目录被拒绝；纯名字自动建到 `sandbox/<名字>`；
 - **安全红线：只有用户可以设置工作区，模型无权修改**（它没有对应工具）；
 - 会话级绑定，通过 `threading.local` 在多线程服务器里防串台。

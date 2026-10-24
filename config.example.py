@@ -40,6 +40,11 @@ ENABLE_TOOLS = True
 # 保险丝：一轮对话里最多允许模型连续调用工具几轮（防止它死循环烧钱）
 MAX_TOOL_ROUNDS = 8
 
+# 执行命令工具（exec_command）的总开关：
+# True = 模型可以在工作区里执行系统命令（跑脚本、git、查环境等）；
+# False = 工具不注册，模型看不到这个能力
+ENABLE_EXEC = True
+
 # ===== 上下文管理（自动压缩）=====
 
 # 总开关

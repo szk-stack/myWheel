@@ -15,6 +15,7 @@
 | 类别 | 工具 | 说明 |
 |---|---|---|
 | **文件工具** | [list_dir](list_dir.md) / [read_file](read_file.md) / [write_file](write_file.md) / [edit_file](edit_file.md) | 都在**工作区**内操作（`safe_path` 锁定） |
+| **系统工具** | [exec_command](exec_command.md) | 在工作区执行系统命令（跑脚本、git、查环境）——**不受路径锁保护**，见其安全说明 |
 | **代理工具** | [spawn_agent](spawn_agent.md) | 派子代理独立干活（多 agent 积木） |
 
 ## 2. 工具的"三段式"结构（每个工具文件都长这样）
@@ -72,6 +73,7 @@ register(DESCRIPTION, run)
 | [read_file](read_file.md) | 读文件（带行号） | 支持 offset/limit 分段；8000 字符截断保护 |
 | [write_file](write_file.md) | 创建/整体覆盖文件 | 自动建父目录；会**整份替换** |
 | [edit_file](edit_file.md) | 精确查找替换 | `old_text` 必须**恰好出现一次**才动手 |
+| [exec_command](exec_command.md) | 执行系统命令 | 工作区 cwd；危险命令黑名单；60s 超时；输出截断 |
 | [spawn_agent](spawn_agent.md) | 派子代理干活 | 独立上下文；防套娃；完整过程可展开查看 |
 
 ## 6. 加一个新工具（完整示例）
@@ -110,8 +112,10 @@ register(DESCRIPTION, run)
 
 ## 7. 已知限制与坑
 
-- **工具的运行权限 = 工作区**：没有"只读工具集"之类的分级（子代理场景
-  用禁用名单做的是"减工具"，不是"降权限"）；
+- **工具的运行权限 = 工作区**（`exec_command` 例外）：文件工具都被锁在工作区内；
+  命令是任意程序，工作区只是它的默认执行目录，技术上挡不住越界——
+  需要更严的管控时，挂 `before_tool` 插件做"命令确认/白名单"；
+- **没有"只读工具集"之类的分级**（子代理场景用禁用名单做的是"减工具"，不是"降权限"）；
 - **文件工具只认 UTF-8**：非 UTF-8 文本会返回解码错误（未做编码探测）；
 - **工具是同步执行的**：一个工具没跑完，本轮不会开始下一个——
   没有并行工具调用；
