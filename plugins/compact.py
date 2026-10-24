@@ -29,6 +29,31 @@ from hooks import before_llm
 # 汉字约 0.6 token/字，其他字符约 0.25 token/个，每条消息再 +4
 # ------------------------------------------------------------
 
+def message_text(m):
+    """取一条消息的"文本部分"（content 可能是字符串，也可能是多模态块数组）。"""
+    content = m.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "image":
+                    parts.append("[图片]")
+        return "".join(parts)
+    return ""
+
+
+def message_image_count(m):
+    """一条消息里有几张图片（估算 token 用）。"""
+    content = m.get("content")
+    if not isinstance(content, list):
+        return 0
+    return sum(1 for b in content if isinstance(b, dict) and b.get("type") == "image")
+
+
 def estimate_tokens(messages):
     total = 0
     for m in messages:
@@ -40,12 +65,14 @@ def estimate_tokens(messages):
             text = (m.get("result") or "") + args_json
             extra = 4
         else:
-            text = m.get("content") or ""
+            text = message_text(m)
             extra = 0
         cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
         other = len(text) - cjk
         # 向上取整（和前端 JS 的 Math.ceil 对齐，保证两边算出的数字一致）
         total += math.ceil(cjk * 0.6 + other * 0.25) + 4 + extra
+        # 图片按官方上限估算：每张最多约 384 token（取 400 保守值，和前端一致）
+        total += message_image_count(m) * 400
     return total
 
 
@@ -122,7 +149,7 @@ def make_compaction(messages, old=None):
             lines.append(f"（工具 {m.get('name', '')} 的结果）{str(m.get('result', ''))[:500]}")
             continue
         speaker = "用户" if m.get("role") == "user" else "助手"
-        lines.append(f"{speaker}：{m.get('content', '')}")
+        lines.append(f"{speaker}：{message_text(m)}")   # 图片在素材里以"[图片]"占位
     parts.append("\n".join(lines))
 
     summary = llm.chat([

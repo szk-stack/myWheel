@@ -64,6 +64,17 @@ def chat(messages):
         raise RuntimeError(f"连不上 API 服务器，请检查网络：{e.reason}") from e
 
 
+def _has_image(messages):
+    """这批消息里有没有图片（多模态块）？有的话要用视觉模型。"""
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "image_url":
+                    return True
+    return False
+
+
 def chat_stream(messages, tools=None):
     """流式请求模型，产出三类"事件"（生成器）。
 
@@ -89,9 +100,15 @@ def chat_stream(messages, tools=None):
             "还没有填 API Key！请打开 config.py，把 API_KEY 填进引号里，然后重启服务。"
         )
 
+    # ★ 模型路由：有图片的请求自动换视觉模型（只有视觉模型能接收图片——
+    #   官方限制：其他模型收到图片会 400）
+    model = config.MODEL
+    if getattr(config, "ENABLE_VISION", False) and _has_image(messages):
+        model = config.VISION_MODEL
+
     # 2. 拼请求体：这次多了 "stream"，还可以带上 "tools"
     body_dict = {
-        "model": config.MODEL,
+        "model": model,
         "messages": messages,
         "stream": True,        # ★ 开启流式（打字机效果的源头）
     }

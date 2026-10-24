@@ -88,11 +88,71 @@ def _convert_tool_history(messages):
     return out
 
 
+def _image_data_url(path):
+    """把 uploads/xxx.png 读成给模型看的 data URL；文件不存在返回 None。
+
+    安全：路径必须落在项目目录内（和文件工具同一个世界观）。
+    """
+    import base64
+
+    p = (toolbox.PROJECT_ROOT / path).resolve()
+    if not p.is_relative_to(toolbox.PROJECT_ROOT) or not p.is_file():
+        return None
+    mime = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp",
+    }.get(p.suffix.lower())
+    if not mime:
+        return None
+    return f"data:{mime};base64,{base64.b64encode(p.read_bytes()).decode()}"
+
+
+def _convert_images(messages):
+    """把消息里的"图片块"转成模型能读的多模态格式。
+
+    我们存储时图片用轻量引用：{"type": "image", "path": "uploads/xx.png"}
+    （图片本体在磁盘上，事件日志里只存路径）；
+    发给模型前转换为 OpenAI 格式：{"type": "image_url", "image_url": {"url": dataURL}}。
+
+    只处理 user 消息——官方限制：图片放在 system / assistant 消息里会 400。
+    """
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if m.get("role") != "user" or not isinstance(content, list):
+            out.append(m)
+            continue
+        blocks = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "image" and block.get("path"):
+                data_url = _image_data_url(block["path"])
+                if data_url:
+                    blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+                else:
+                    blocks.append({"type": "text", "text": "（图片文件缺失，无法加载）"})
+            elif block.get("type") == "text":
+                blocks.append({"type": "text", "text": block.get("text", "")})
+        out.append({"role": "user", "content": blocks})
+    return out
+
+
 def _slim_message(m):
     """给链路快照里的单条消息瘦身：内容 / 工具参数截断，防快照无限膨胀。"""
     out = dict(m)
-    if isinstance(out.get("content"), str):
-        out["content"] = tracing.slim_text(out["content"])
+    content = out.get("content")
+    if isinstance(content, str):
+        out["content"] = tracing.slim_text(content)
+    elif isinstance(content, list):
+        # 多模态块数组：文本块截断，图片块保持原样（里面只有轻量路径引用）
+        slim_blocks = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                slim_blocks.append({**block, "text": tracing.slim_text(block.get("text", ""))})
+            else:
+                slim_blocks.append(block)
+        out["content"] = slim_blocks
     if out.get("tool_calls"):
         slim_calls = []
         for tc in out["tool_calls"]:
@@ -189,8 +249,9 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
 
         # 工作副本：先把历史里的"工具记录"转换成模型能读懂的标准格式
         # （工具结果从此会跟着上下文发给模型——它不用重复读文件了），
+        # 再把图片块转成多模态格式（路径 → base64 data URL），
         # 之后的工具对话也追加在它身上，不动原来的 messages 列表
-        work_messages = _convert_tool_history(ctx["messages"])
+        work_messages = _convert_images(_convert_tool_history(ctx["messages"]))
 
         # ② agent 循环
         while True:

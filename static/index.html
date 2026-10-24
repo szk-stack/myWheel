@@ -599,6 +599,62 @@
   #btn:hover { background: var(--accent-strong); }
   #btn:disabled { background: var(--bg-accent-soft); color: var(--accent); cursor: not-allowed; }
 
+  /* ===== 图片输入（多模态） ===== */
+  #imgBtn {
+    padding: 0 var(--sp-3);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    align-self: stretch;
+  }
+  #imgBtn:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  #imageTray {
+    display: flex;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+    padding: var(--sp-1) 0;
+  }
+  #imageTray.hidden { display: none; }
+  .tray-item {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    background: var(--bg-surface);
+  }
+  .tray-item img {
+    display: block;
+    height: 56px;
+    width: auto;
+  }
+  .tray-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(51, 45, 36, 0.65);
+    color: var(--n50);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .tray-remove:hover { background: var(--danger); }
+  /* 消息气泡里的图片 */
+  .msg-image {
+    display: block;
+    max-width: 260px;
+    max-height: 220px;
+    border-radius: var(--r-sm);
+    margin-top: var(--sp-1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+
   /* ===== 链路日志（观测）：左下角入口 ===== */
   #traceBtn {
     margin: var(--sp-2) var(--sp-3) var(--sp-3);
@@ -829,10 +885,15 @@
           <button id="compactNowBtn">立即压缩</button>
         </div>
       </div>
+      <!-- 待发送的图片缩略图（有图时才显示） -->
+      <div id="imageTray" class="hidden"></div>
       <div id="inputRow">
-        <textarea id="input" rows="3" placeholder="输入消息，按 Enter 发送（Shift+Enter 换行）"></textarea>
+        <button id="imgBtn" title="添加图片（也可以直接 Ctrl+V 粘贴截图）">图片</button>
+        <textarea id="input" rows="3" placeholder="输入消息，按 Enter 发送（Shift+Enter 换行）；可直接粘贴截图"></textarea>
         <button id="btn">发送</button>
       </div>
+      <!-- 隐藏的文件选择器（点「图片」按钮时触发） -->
+      <input type="file" id="imgFile" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="hidden">
     </footer>
   </main>
 
@@ -887,6 +948,7 @@ const state = {
 let sending = false;     // 正在等 AI 回复吗？
 let errorText = "";      // 有错误就存在这里，渲染时显示出来
 let thinkingEl = null;   // "思考中…"那个气泡元素（流式回答就"长"在它身上）
+let pendingImages = [];  // 待发送的图片（{dataUrl, name}）——发送成功后清空
 
 // ---------- 先把页面上的元素抓在手里，后面反复要用 ----------
 const convListEl = document.getElementById("convList");
@@ -904,6 +966,10 @@ const chatBox = document.getElementById("chat");
 const input = document.getElementById("input");
 const btn = document.getElementById("btn");
 const newBtn = document.getElementById("newBtn");
+// 图片输入相关
+const imgBtnEl = document.getElementById("imgBtn");        // "图片"按钮
+const imgFileEl = document.getElementById("imgFile");      // 隐藏的文件选择器
+const imageTrayEl = document.getElementById("imageTray");  // 待发送缩略图托盘
 // 链路日志相关
 const traceBtnEl = document.getElementById("traceBtn");       // 左下角入口按钮
 const traceOverlayEl = document.getElementById("traceOverlay"); // 弹层遮罩
@@ -1287,18 +1353,107 @@ async function branchConversation(sourceId, index) {
 }
 
 // ============================================================
+// 【图片输入】粘贴 / 选文件 → 待发送缩略图 → 发送时上传拿路径
+// ------------------------------------------------------------
+// 图片本体存到后端 uploads/ 目录，消息里只存路径引用——
+// 这样事件日志（data.jsonl）不会被 base64 撑爆。
+// ============================================================
+const MAX_IMAGE_MB = 5;   // 单张图片上限（和后端 config.MAX_IMAGE_MB 一致）
+
+function addPendingImage(file) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return;
+  if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+    alert("图片太大（上限 " + MAX_IMAGE_MB + " MB）");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function () {
+    pendingImages.push({ dataUrl: reader.result, name: file.name || "粘贴的截图" });
+    renderImageTray();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderImageTray() {
+  imageTrayEl.innerHTML = "";
+  imageTrayEl.classList.toggle("hidden", pendingImages.length === 0);
+  pendingImages.forEach(function (img, index) {
+    const item = document.createElement("div");
+    item.className = "tray-item";
+    const thumb = document.createElement("img");
+    thumb.src = img.dataUrl;
+    thumb.alt = img.name;
+    const remove = document.createElement("button");
+    remove.className = "tray-remove";
+    remove.textContent = "×";
+    remove.title = "移除这张图";
+    remove.addEventListener("click", function () {
+      pendingImages.splice(index, 1);
+      renderImageTray();
+    });
+    item.appendChild(thumb);
+    item.appendChild(remove);
+    imageTrayEl.appendChild(item);
+  });
+}
+
+// 上传一张图到后端（存 uploads/），返回相对路径；失败返回 null
+async function uploadImage(img) {
+  try {
+    const res = await fetch("/api/images", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: img.dataUrl, name: img.name }),
+    });
+    const data = await res.json();
+    return data.ok ? data.path : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+// 图片路径 → 浏览器可加载的地址（data: 前缀直接用；相对路径走 /uploads/ 路由）
+function imageSrc(path) {
+  if (typeof path !== "string") return "";
+  return path.startsWith("data:") ? path : "/" + path.replace(/\\/g, "/");
+}
+
+// ============================================================
 // 四、发送消息（核心流程）
 // ============================================================
 async function sendMessage() {
   const text = input.value.trim();
-  if (!text || sending) return;      // 空消息 or 正在等回复 → 不理它
+  const images = pendingImages.slice();   // 本条消息要带的图片
+  if ((!text && images.length === 0) || sending) return;   // 空消息 → 不理它
 
   const conv = currentConv();
   if (!conv) return;
 
-  // 1. 用户的话先放进内存显示出来，清空输入框
-  conv.messages.push({ role: "user", content: text });
+  // 1. 先把图片上传到后端（消息里只存路径——图片本体不进事件日志）；
+  //    上传失败就中止，图片还留在托盘里可以重试
+  const imageBlocks = [];
+  for (const img of images) {
+    const path = await uploadImage(img);
+    if (!path) {
+      alert("图片上传失败，请重试");
+      return;
+    }
+    imageBlocks.push({ type: "image", path: path });
+  }
+
+  // 2. 组用户消息的内容：有图 → 多模态块数组；没图 → 纯字符串（向后兼容）
+  let userContent = text;
+  if (imageBlocks.length) {
+    userContent = [];
+    if (text) userContent.push({ type: "text", text: text });
+    imageBlocks.forEach(function (b) { userContent.push(b); });
+  }
+
+  // 3. 放进内存显示出来，清空输入框和图片托盘
+  conv.messages.push({ role: "user", content: userContent });
   input.value = "";
+  pendingImages = [];
+  renderImageTray();
   errorText = "";
 
   // 2. 进入"发送中"状态，并重新渲染（页面会显示"思考中…"气泡）
@@ -1450,7 +1605,7 @@ async function sendMessage() {
     //    （user → [文字/工具 交替] → 完成；工具记录也进日志，方便回溯）
     const events = [];
     if (compactEvent) events.push(compactEvent);   // 压缩记录排最前（本轮的附注）
-    events.push({ type: "message", conversation_id: conv.id, role: "user", content: text });
+    events.push({ type: "message", conversation_id: conv.id, role: "user", content: userContent });
     segments.forEach(function (seg) {
       if (seg.type === "text") {
         events.push({
@@ -1469,7 +1624,7 @@ async function sendMessage() {
       }
     });
     if (conv.title === "新对话") {
-      conv.title = text.slice(0, 12);   // 取前 12 个字当标题
+      conv.title = (text || "图片").slice(0, 12);   // 取前 12 个字当标题（只有图就用"图片"）
       events.push({ type: "rename", id: conv.id, title: conv.title });
     }
     await appendEvents(events);
@@ -1550,7 +1705,27 @@ function renderSidebar() {
 // （这里的默认值只是"还没拿到后端配置"时的兜底，按 deepseek-flash 的 1M 窗口）
 let contextConfig = { window: 1000000, threshold_ratio: 0.7, keep_recent: 12, enabled: true, baseline_tokens: 0 };
 
-// 粗略估算：汉字约 0.6 token/字，其他字符约 0.25 token/个，每条消息 +4
+// 取一条消息的"文本部分"（content 可能是字符串，也可能是多模态块数组）
+function messageText(m) {
+  if (typeof m.content === "string") return m.content;
+  if (Array.isArray(m.content)) {
+    return m.content.map(function (b) {
+      if (b && b.type === "text") return b.text || "";
+      if (b && b.type === "image") return "[图片]";
+      return "";
+    }).join("");
+  }
+  return "";
+}
+
+// 一条消息里有几张图片（估算 token 用）
+function messageImageCount(m) {
+  if (!Array.isArray(m.content)) return 0;
+  return m.content.filter(function (b) { return b && b.type === "image"; }).length;
+}
+
+// 粗略估算：汉字约 0.6 token/字，其他字符约 0.25 token/个，每条消息 +4，
+// 图片每张 +400（官方单图上限约 384，取保守值）
 // （和 plugins/compact.py 的 estimate_tokens 保持同一套公式）
 function estimateTokens(messages) {
   let total = 0;
@@ -1561,7 +1736,7 @@ function estimateTokens(messages) {
       // 而且它发给模型时会展开成"两条消息"——如实算
       text = (m.result || "") + JSON.stringify(m.arguments || {});
     } else {
-      text = m.content || "";
+      text = messageText(m);
     }
     let cjk = 0;
     let other = 0;
@@ -1569,7 +1744,8 @@ function estimateTokens(messages) {
       if (ch >= "\u4e00" && ch <= "\u9fff") cjk++;
       else other++;
     }
-    total += Math.ceil(cjk * 0.6 + other * 0.25) + 4 + (m.role === "tool" ? 4 : 0);
+    total += Math.ceil(cjk * 0.6 + other * 0.25) + 4 + (m.role === "tool" ? 4 : 0)
+      + messageImageCount(m) * 400;
   }
   return total;
 }
@@ -1691,6 +1867,21 @@ function addBubble(role, text, branchInfo) {
   if (role === "ai") {
     // AI 的回复：按 Markdown 渲染成真正的格式（renderMarkdown 内部先做了转义，防注入）
     div.innerHTML = renderMarkdown(text);
+  } else if (Array.isArray(text)) {
+    // 用户消息可能是"多模态块数组"（文字 + 图片）
+    text.forEach(function (block) {
+      if (block.type === "text" && block.text) {
+        const p = document.createElement("div");
+        p.textContent = block.text;
+        div.appendChild(p);
+      } else if (block.type === "image" && block.path) {
+        const img = document.createElement("img");
+        img.className = "msg-image";
+        img.src = imageSrc(block.path);
+        img.alt = "图片";
+        div.appendChild(img);
+      }
+    });
   } else {
     // 用户的消息：原样显示（textContent 天然安全）
     div.textContent = text;
@@ -2030,6 +2221,24 @@ async function init() {
 
 // ---------- 事件绑定 ----------
 newBtn.addEventListener("click", createConversation);
+
+// 图片输入：点「图片」选文件；在输入框里 Ctrl+V 粘贴截图
+imgBtnEl.addEventListener("click", function () { imgFileEl.click(); });
+imgFileEl.addEventListener("change", function () {
+  for (const f of imgFileEl.files) addPendingImage(f);
+  imgFileEl.value = "";   // 清空，允许重复选同一张图
+});
+input.addEventListener("paste", function (e) {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.type && it.type.startsWith("image/")) {
+      e.preventDefault();   // 拦住"粘贴成路径文字"的默认行为
+      const f = it.getAsFile();
+      if (f) addPendingImage(f);
+    }
+  }
+});
 
 // 链路日志：左下角按钮打开；关闭按钮 / 点遮罩 / Esc 都能关
 traceBtnEl.addEventListener("click", openTracePanel);

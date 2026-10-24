@@ -45,6 +45,17 @@ MAX_TOOL_ROUNDS = 8
 # False = 工具不注册，模型看不到这个能力
 ENABLE_EXEC = True
 
+# ===== 图片 / 截图理解（多模态输入）=====
+
+# 总开关：True = 可以在输入框粘贴/上传图片，有图片的请求自动用视觉模型
+ENABLE_VISION = True
+
+# 视觉模型：只有它接受图片输入（官方实验版，纯文本能力与 deepseek-flash 持平）
+VISION_MODEL = "deepseek-v4-flash-vision-exp"
+
+# 单张图片的大小上限（MB）——原图直传，不做压缩
+MAX_IMAGE_MB = 5
+
 # ===== 上下文管理（自动压缩）=====
 
 # 总开关

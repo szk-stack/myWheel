@@ -14,9 +14,11 @@ server.py —— 启动入口（用这个文件启动整个项目）
      - 设置工作区                  （POST /api/workspace）    → 校验并创建目录（agent 的活动范围）
 """
 
+import base64
 import json
 import shutil
 import subprocess
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -81,6 +83,10 @@ class ChatHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json(200, t)
 
+        elif self.path.startswith("/uploads/"):
+            # 对话里引用的图片（消息里存相对路径，图片本体在这个目录）
+            self._serve_upload_file(self.path[len("/uploads/"):])
+
         elif self.path.startswith("/static/"):
             # 静态资源（比如前端用来渲染 Markdown 的 marked.min.js）
             self._serve_static_file(self.path[len("/static/"):])
@@ -140,6 +146,15 @@ class ChatHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"ok": False, "error": "消息还太少，暂时不需要压缩"})
                 else:
                     self._send_json(200, {"ok": True, **result})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+
+        elif self.path == "/api/images":
+            # ---- 图片上传：把浏览器发来的 base64 存成文件，返回相对路径 ----
+            # （消息里只存这个路径——图片本体不进事件日志，否则日志会爆炸）
+            try:
+                path = self._save_image(data.get("data", ""), data.get("name", ""))
+                self._send_json(200, {"ok": True, "path": path})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
 
@@ -264,6 +279,60 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(f"{len(done):X}\r\n".encode("utf-8") + done + b"\r\n")
         self.wfile.write(b"0\r\n\r\n")   # 分块编码的结束标记：长度为 0 的块
         self.wfile.flush()
+
+    def _save_image(self, data_url, name):
+        """把浏览器发来的图片 data URL 存成文件（uploads/），返回相对路径。
+
+        为什么存文件而不是塞进事件日志：一张截图的 base64 有几百 KB，
+        存进 data.jsonl 会让日志爆炸——消息里只存相对路径，本体存这里。
+        """
+        if not isinstance(data_url, str) or not data_url.startswith("data:image/"):
+            raise ValueError("不是合法的图片（需要 data:image/... 格式）")
+
+        header, _, b64 = data_url.partition(",")
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            raise ValueError("图片内容解码失败")
+
+        limit = config.MAX_IMAGE_MB * 1024 * 1024
+        if len(raw) > limit:
+            raise ValueError(
+                f"图片太大（{len(raw) // 1024 // 1024 + 1} MB，上限 {config.MAX_IMAGE_MB} MB）"
+            )
+
+        # 从 "data:image/png;base64" 里取扩展名（按内容类型，不信任文件名）
+        ext = header.split(";")[0].split("/")[-1].lower() or "png"
+        if ext == "jpeg":
+            ext = "jpg"
+        if ext not in ("png", "jpg", "gif", "webp"):
+            raise ValueError(f"不支持的图片格式：{ext}")
+
+        uploads = ROOT / "uploads"
+        uploads.mkdir(exist_ok=True)
+        filename = f"{time.time_ns()}.{ext}"
+        (uploads / filename).write_bytes(raw)
+        return f"uploads/{filename}"
+
+    def _serve_upload_file(self, relative_path):
+        """把 uploads/ 目录里的图片发出去（路径限制在 uploads 内，防越界）。"""
+        uploads_root = (ROOT / "uploads").resolve()
+        target = (uploads_root / relative_path).resolve()
+        if not target.is_relative_to(uploads_root) or not target.is_file():
+            self.send_error(404, "Not Found")
+            return
+
+        content_type = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".webp": "image/webp",
+        }.get(target.suffix.lower(), "application/octet-stream")
+
+        payload = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _serve_static_file(self, relative_path):
         """把 static/ 目录里的文件发出去（路径限制在 static 目录内，防越界）。"""

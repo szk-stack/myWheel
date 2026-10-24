@@ -158,6 +158,10 @@ delta.tool_calls[0] = {"index": 0, "function": {"arguments": "\"a.md\"}" }}
   且"模型可能先说话、再要工具"，所以它注定是本轮流事件的最后一项。
 - **错误统一转 `RuntimeError` 且人话化**：唯一消费方是前端展示——
   错误信息直接面向用户，不能是英文堆栈。
+- **按内容自动选模型（视觉路由）**：请求里含图片块（`image_url`）时自动改用
+  `config.VISION_MODEL`（`deepseek-v4-flash-vision-exp`）——官方限制：只有
+  视觉模型能接收图片，其他模型遇到图片会 400；无图请求仍用 `config.MODEL`。
+  注意：视觉模型是**实验版**（-exp），稳定性以官方为准。
 
 ## 7. 扩展指南
 
