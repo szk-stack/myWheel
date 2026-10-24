@@ -17,11 +17,13 @@ engine.py —— 引擎：把整个流程串起来
 import importlib
 import json
 import pkgutil
+import time
 
 import config
 import hooks
 import llm
 import toolbox
+import tracing
 
 
 def chat(messages):
@@ -86,7 +88,29 @@ def _convert_tool_history(messages):
     return out
 
 
-def chat_stream(messages, workspace=None, compaction=None, skip_persona=False):
+def _slim_message(m):
+    """给链路快照里的单条消息瘦身：内容 / 工具参数截断，防快照无限膨胀。"""
+    out = dict(m)
+    if isinstance(out.get("content"), str):
+        out["content"] = tracing.slim_text(out["content"])
+    if out.get("tool_calls"):
+        slim_calls = []
+        for tc in out["tool_calls"]:
+            fn = tc.get("function") or {}
+            slim_calls.append({
+                "id": tc.get("id", ""),
+                "type": tc.get("type", "function"),
+                "function": {
+                    "name": fn.get("name", ""),
+                    "arguments": tracing.slim_text(fn.get("arguments", ""), 800),
+                },
+            })
+        out["tool_calls"] = slim_calls
+    return out
+
+
+def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
+                conversation_id=None, trace_source="main"):
     """流式版对话流程（生成器）。
 
     参数 workspace：本次对话的工作区目录（None = 默认项目目录）——
@@ -100,16 +124,20 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False):
     —— 子代理（spawn_agent 工具）用它：子代理有自己的专门人设
     （config.SUBAGENT_PROMPT），不希望项目人设再混进去。
 
-    ★ 这次升级成了"agent 循环"——从"一问一答"变成"多轮干活"：
+    参数 conversation_id / trace_source：链路观测用——把这次执行记进
+    traces.jsonl（哪个会话、主对话还是子代理）。观测失败不影响主流程。
 
-        调模型（流式）──► 模型直接回答？ → 结束
-              │
-              └─► 模型说"我要用工具" → 执行工具 → 结果塞回历史 → 再调模型 →……
+    ★ 一次调用 = 一个"任务"的完整生命周期（从收到请求到最终回答）。
+      每一步都会记进链路日志（tracing）：每轮**实际发给模型的上下文快照**、
+      模型的思考过程（reasoning）、工具调用与耗时、最终输出。
 
     产出的事件（都是字典）：
       {"type": "text", "text": "..."}                           文字增量
       {"type": "tool_call", "name": "...", "arguments": {...}}  开始执行某个工具
       {"type": "tool_result", ...}                              工具执行完毕（带结果）
+      {"type": "compacted", ...}                                本轮发生了自动压缩
+
+    （llm 层的 reasoning 事件只进链路日志，不往前端转发。）
 
     两个从流式改造时延续下来的取舍（没变）：
       - before_llm 照常工作（可以改 messages）
@@ -121,123 +149,187 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False):
         "meta": {},
     }
 
-    # ★ 第 0 步：先把工作区告诉工具箱——接下来所有工具都被锁在它里面干活
-    #   （用"线程本地"记录：多线程服务器里，不同对话的请求互不串台）
-    toolbox.set_workspace(workspace)
+    # ★ 链路观测：从任务开始计时，先建一份"空记录"（收尾时统一落盘）
+    trace_started = time.time()
+    trace = tracing.new_trace(conversation_id, workspace, config.MODEL, trace_source)
 
-    # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
-    #   "应用"已有的压缩（切成"摘要 + 最近消息"）
-    ctx["meta"]["compaction"] = compaction
-
-    # ★ 第 0.6 步：把"跳过项目人设"标记放进数据袋——
-    #   system_prompt 插件看到它就收手（子代理自带人设）
-    ctx["meta"]["skip_persona"] = skip_persona
-
-    # ① 调模型之前：before_llm 插件照常工作
-    #    （其中 compact 插件可能在这里做"上下文压缩"——它会应用旧压缩，
-    #      并在超阈值时生成新摘要，结果记在 ctx["meta"] 里）
-    hooks.run(hooks.before_llm, ctx)
-
-    # ★ 如果刚才发生了压缩，把这件事告诉前端（记账 + 显示压缩卡片 + 用量回落）
-    if ctx["meta"].get("new_compaction"):
-        new_c = ctx["meta"]["new_compaction"]
-        yield {
-            "type": "compacted",
-            "summary": new_c["summary"],
-            "first_kept_index": new_c["first_kept_index"],
-            "tokens_before": ctx["meta"].get("tokens_before_compact", 0),
-        }
-
-    # 准备工具"说明书"（发不发给模型，看 config 里的总开关）
-    tools_desc = toolbox.all_descriptions() if config.ENABLE_TOOLS else []
-
-    # 工作副本：先把历史里的"工具记录"转换成模型能读懂的标准格式
-    # （工具结果从此会跟着上下文发给模型——它不用重复读文件了），
-    # 之后的工具对话也追加在它身上，不动原来的 messages 列表
-    work_messages = _convert_tool_history(ctx["messages"])
-
-    # ② agent 循环
-    text_pieces = []      # 攒完整回答（给 after_llm 用）
+    text_pieces = []      # 攒完整回答（给 after_llm 和链路日志用）
     used_rounds = 0       # 已经执行过几轮工具
 
-    while True:
-        pending_calls = None
-
-        # 调一次模型（流式），把文字一段段往外转交
-        for event in llm.chat_stream(work_messages, tools=tools_desc):
-            if event["type"] == "text":
-                text_pieces.append(event["text"])
-                yield event                     # 文字直接往外流
-            elif event["type"] == "tool_calls":
-                pending_calls = event["tool_calls"]
-
-        if not pending_calls:
-            break    # 模型正常答完了 → 收工
-
-        # 保险丝：模型连续调工具的轮数超上限就停（防死循环烧钱）
-        if used_rounds >= config.MAX_TOOL_ROUNDS:
-            print(f"[警告] 工具调用达到上限（{config.MAX_TOOL_ROUNDS} 轮），停止继续执行")
-            break
-        used_rounds += 1
-
-        # ③ 按官方协议，把"模型要求调工具"这件事记进工作历史
-        #    （OpenAI 兼容格式：assistant 消息带 tool_calls 字段）
-        work_messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": call["id"],
-                    "type": "function",
-                    "function": {"name": call["name"], "arguments": call["arguments"]},
-                }
-                for call in pending_calls
-            ],
-        })
-
-        # 逐个执行这次要求的工具（模型可能一次要调好几个）
-        for call in pending_calls:
-            # 模型给的参数是 JSON 字符串，解析成字典
-            try:
-                arguments = json.loads(call["arguments"] or "{}")
-            except json.JSONDecodeError:
-                arguments = {}
-
-            # 告诉外面："要开始执行工具了"（前端用来显示状态）
-            yield {"type": "tool_call", "name": call["name"], "arguments": arguments}
-
-            result = toolbox.call(call["name"], arguments)   # ★ 真正执行！
-
-            # 取走这次工具"捎带的附件"（比如子代理的完整对话记录）——
-            # 它会跟着 tool_result 一起流向对前端和日志
-            extra = toolbox.take_attachments()
-
-            # 告诉外面："执行完了"（前端用来显示结果、并记账）
-            event = {
-                "type": "tool_result",
-                "name": call["name"],
-                "arguments": arguments,
-                "ok": not result.startswith("错误"),
-                "result": result,
-            }
-            if extra:
-                event["extra"] = extra
-            yield event
-
-            # 按官方协议把结果塞回工作历史（role=tool + 对应的 tool_call_id）
-            work_messages.append({
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "content": result,
-            })
-
-    # ④ 循环结束：把完整回答交给 after_llm（记录类用途，前面解释过）
-    ctx["reply"] = "".join(text_pieces)
     try:
-        hooks.run(hooks.after_llm, ctx)
+        # ★ 第 0 步：先把工作区告诉工具箱——接下来所有工具都被锁在它里面干活
+        #   （用"线程本地"记录：多线程服务器里，不同对话的请求互不串台）
+        toolbox.set_workspace(workspace)
+
+        # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
+        #   "应用"已有的压缩（切成"摘要 + 最近消息"）
+        ctx["meta"]["compaction"] = compaction
+
+        # ★ 第 0.6 步：把"跳过项目人设"标记放进数据袋——
+        #   system_prompt 插件看到它就收手（子代理自带人设）
+        ctx["meta"]["skip_persona"] = skip_persona
+
+        # ① 调模型之前：before_llm 插件照常工作
+        #    （其中 compact 插件可能在这里做"上下文压缩"——它会应用旧压缩，
+        #      并在超阈值时生成新摘要，结果记在 ctx["meta"] 里）
+        hooks.run(hooks.before_llm, ctx)
+
+        # ★ 如果刚才发生了压缩，把这件事告诉前端（记账 + 显示压缩卡片 + 用量回落）
+        if ctx["meta"].get("new_compaction"):
+            new_c = ctx["meta"]["new_compaction"]
+            yield {
+                "type": "compacted",
+                "summary": new_c["summary"],
+                "first_kept_index": new_c["first_kept_index"],
+                "tokens_before": ctx["meta"].get("tokens_before_compact", 0),
+            }
+
+        # 准备工具"说明书"（发不发给模型，看 config 里的总开关）
+        tools_desc = toolbox.all_descriptions() if config.ENABLE_TOOLS else []
+
+        # 工作副本：先把历史里的"工具记录"转换成模型能读懂的标准格式
+        # （工具结果从此会跟着上下文发给模型——它不用重复读文件了），
+        # 之后的工具对话也追加在它身上，不动原来的 messages 列表
+        work_messages = _convert_tool_history(ctx["messages"])
+
+        # ② agent 循环
+        while True:
+            pending_calls = None
+            round_started = time.time()
+            round_text = ""        # 本轮的文字输出（链路日志用）
+            round_reasoning = ""   # 本轮的思考过程（链路日志用）
+
+            # ★ 链路观测：每轮调模型前，抓一份"实际发送的上下文快照"
+            #   ——这是排查问题时的第一现场（压缩后、协议转换后的真实形态）
+            request_snapshot = {
+                "messages": [_slim_message(m) for m in work_messages],
+                "tools": [t["function"]["name"] for t in tools_desc],
+                "message_count": len(work_messages),
+            }
+
+            # 调一次模型（流式），把文字一段段往外转交
+            for event in llm.chat_stream(work_messages, tools=tools_desc):
+                if event["type"] == "text":
+                    text_pieces.append(event["text"])
+                    round_text += event["text"]
+                    yield event                     # 文字直接往外流
+                elif event["type"] == "reasoning":
+                    round_reasoning += event["text"]   # 只进链路日志，不转发
+                elif event["type"] == "tool_calls":
+                    pending_calls = event["tool_calls"]
+
+            # 把这一轮的过程记进链路
+            round_record = {
+                "index": len(trace["rounds"]),
+                "request": request_snapshot,
+                "reasoning": round_reasoning,
+                "text": round_text,
+                "tool_calls": [],
+                "duration_ms": int((time.time() - round_started) * 1000),
+            }
+            trace["rounds"].append(round_record)
+
+            if not pending_calls:
+                break    # 模型正常答完了 → 收工
+
+            # 保险丝：模型连续调工具的轮数超上限就停（防死循环烧钱）
+            if used_rounds >= config.MAX_TOOL_ROUNDS:
+                print(f"[警告] 工具调用达到上限（{config.MAX_TOOL_ROUNDS} 轮），停止继续执行")
+                break
+            used_rounds += 1
+
+            # ③ 按官方协议，把"模型要求调工具"这件事记进工作历史
+            #    （OpenAI 兼容格式：assistant 消息带 tool_calls 字段）
+            #    ★ 思考模式下带 tools 的请求，reasoning_content 要随 assistant
+            #      消息完整回传（官方文档要求，否则后续请求可能 400）；
+            #      本轮没有思考内容就不带这个字段
+            assistant_msg = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": call["id"],
+                        "type": "function",
+                        "function": {"name": call["name"], "arguments": call["arguments"]},
+                    }
+                    for call in pending_calls
+                ],
+            }
+            if round_reasoning:
+                assistant_msg["reasoning_content"] = round_reasoning
+            work_messages.append(assistant_msg)
+
+            # 逐个执行这次要求的工具（模型可能一次要调好几个）
+            for call in pending_calls:
+                # 模型给的参数是 JSON 字符串，解析成字典
+                try:
+                    arguments = json.loads(call["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                # 告诉外面："要开始执行工具了"（前端用来显示状态）
+                yield {"type": "tool_call", "name": call["name"], "arguments": arguments}
+
+                call_started = time.time()
+                result = toolbox.call(call["name"], arguments)   # ★ 真正执行！
+                call_ms = int((time.time() - call_started) * 1000)
+
+                # 取走这次工具"捎带的附件"（比如子代理的完整对话记录）——
+                # 它会跟着 tool_result 一起流向对前端和日志
+                extra = toolbox.take_attachments()
+
+                # ★ 链路观测：工具调用（参数 / 结果 / 耗时）
+                round_record["tool_calls"].append({
+                    "name": call["name"],
+                    "arguments": arguments,
+                    "ok": not result.startswith("错误"),
+                    "result": tracing.slim_text(result, 2000),
+                    "duration_ms": call_ms,
+                })
+
+                # 告诉外面："执行完了"（前端用来显示结果、并记账）
+                event = {
+                    "type": "tool_result",
+                    "name": call["name"],
+                    "arguments": arguments,
+                    "ok": not result.startswith("错误"),
+                    "result": result,
+                }
+                if extra:
+                    event["extra"] = extra
+                yield event
+
+                # 按官方协议把结果塞回工作历史（role=tool + 对应的 tool_call_id）
+                work_messages.append({
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "content": result,
+                })
+
+        # ④ 循环结束：把完整回答交给 after_llm（记录类用途，前面解释过）
+        ctx["reply"] = "".join(text_pieces)
+        try:
+            hooks.run(hooks.after_llm, ctx)
+        except Exception as e:
+            # after_llm 插件出错不影响已经发出的内容，打个警告就好
+            print(f"[警告] after_llm 插件出错：{e}")
+
+        trace["status"] = "ok"
+        trace["final_text"] = ctx["reply"]
+
     except Exception as e:
-        # after_llm 插件出错不影响已经发出的内容，打个警告就好
-        print(f"[警告] after_llm 插件出错：{e}")
+        # 出错也要留痕：链路日志是排查问题最有用的第一手材料
+        trace["status"] = "error"
+        trace["error"] = str(e)
+        trace["final_text"] = "".join(text_pieces)   # 已经流出去的部分
+        raise
+    finally:
+        # 生成器被提前关闭（用户断开 / 页面关掉）也会走到这里
+        if trace["status"] == "running":
+            trace["status"] = "interrupted"
+            trace["final_text"] = "".join(text_pieces)
+        trace["duration_ms"] = int((time.time() - trace_started) * 1000)
+        tracing.save_safe(trace)   # 观测失败不能影响主流程
 
 
 def load_plugins():

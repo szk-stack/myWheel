@@ -75,6 +75,7 @@ flowchart TB
 | 插件 | `plugins/` | 挂在空槽上的功能：system_prompt / compact / logger | [modules/plugins](modules/plugins/README.md) |
 | 空槽 | `hooks.py` | 三个函数列表 + 调度器（整个扩展机制的地基） | [modules/plugins](modules/plugins/README.md)（§2） |
 | 存储 | `storage.py` | 事件日志：追加事件 + 回放推导状态 | [modules/storage](modules/storage/README.md) |
+| 链路观测 | `tracing.py` | 每次任务的完整执行链路（上下文快照 / 思考 / 工具 / 耗时） | [modules/tracing](modules/tracing/README.md) |
 | 配置 | `config.py` | 全部可调参数（Key / 模型 / 阈值 / 开关） | 规划中 |
 | 前端 | `static/index.html` | 单页应用：状态驱动渲染、流式打字机、全部界面逻辑 | 规划中 |
 

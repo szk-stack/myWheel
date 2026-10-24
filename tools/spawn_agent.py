@@ -99,6 +99,7 @@ def run(arguments):
             sub_messages,
             workspace=toolbox.current_workspace(),
             skip_persona=True,
+            trace_source="subagent",   # 链路日志里标记"这是子代理内部链路"
         ):
             if event["type"] == "text":
                 text_buf += event["text"]

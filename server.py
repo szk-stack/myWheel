@@ -24,6 +24,7 @@ import config
 import engine
 import storage
 import toolbox
+import tracing
 
 # 项目根目录（就是本文件所在的位置）
 ROOT = Path(__file__).resolve().parent
@@ -66,6 +67,19 @@ class ChatHandler(BaseHTTPRequestHandler):
                 "baseline_tokens": compact_module.baseline_tokens(),
             }
             self._send_json(200, state)
+
+        elif self.path == "/api/traces":
+            # ---- 链路日志：最近的任务执行链路列表（摘要，给左下角"查看链路日志"用）----
+            self._send_json(200, {"traces": tracing.list_traces(50)})
+
+        elif self.path.startswith("/api/traces/"):
+            # ---- 链路日志详情：按 id 取一条完整链路（含每轮上下文快照）----
+            trace_id = self.path[len("/api/traces/"):]
+            t = tracing.get_trace(trace_id)
+            if t is None:
+                self._send_json(404, {"error": "没有这条链路记录"})
+            else:
+                self._send_json(200, t)
 
         elif self.path.startswith("/static/"):
             # 静态资源（比如前端用来渲染 Markdown 的 marked.min.js）
@@ -208,6 +222,7 @@ class ChatHandler(BaseHTTPRequestHandler):
                 data.get("messages", []),
                 workspace=data.get("workspace"),
                 compaction=data.get("compaction"),   # 压缩状态（compact 插件要用）
+                conversation_id=data.get("conversation_id"),   # 链路日志用（哪个会话）
             ):
                 self._send_sse(event)
             self._end_sse()

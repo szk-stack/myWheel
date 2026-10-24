@@ -65,10 +65,12 @@ def chat(messages):
 
 
 def chat_stream(messages, tools=None):
-    """流式请求模型，产出两类"事件"（生成器）。
+    """流式请求模型，产出三类"事件"（生成器）。
 
     产出的事件（都是字典，方便上层按 type 分发）：
       {"type": "text", "text": "一小段文字"}      —— 回答的文字增量，来一段吐一段
+      {"type": "reasoning", "text": "…"}          —— 模型的思考过程增量
+                                                     （不进前端，由引擎记入链路日志）
       {"type": "tool_calls", "tool_calls": [...]} —— 模型要求调用工具（流结束时才产出）
 
     参数：
@@ -134,6 +136,14 @@ def chat_stream(messages, tools=None):
                 piece = delta.get("content")
                 if piece:
                     yield {"type": "text", "text": piece}
+
+                # 情况一·补充：模型的"思考过程"（思考模式下才有）
+                #   DeepSeek 通过 reasoning_content 下发；不同兼容端点可能叫
+                #   reasoning —— 两个都认。引擎只会把它记进链路日志，
+                #   不往前端转发（想展示思考过程时再改引擎那一处）。
+                reasoning_piece = delta.get("reasoning_content") or delta.get("reasoning")
+                if reasoning_piece:
+                    yield {"type": "reasoning", "text": reasoning_piece}
 
                 # 情况二：工具调用的小碎片，按序号拼起来
                 for call_piece in delta.get("tool_calls") or []:

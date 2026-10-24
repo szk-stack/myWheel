@@ -598,6 +598,197 @@
   }
   #btn:hover { background: var(--accent-strong); }
   #btn:disabled { background: var(--bg-accent-soft); color: var(--accent); cursor: not-allowed; }
+
+  /* ===== 链路日志（观测）：左下角入口 ===== */
+  #traceBtn {
+    margin: var(--sp-2) var(--sp-3) var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  #traceBtn:hover { background: var(--bg-subtle); color: var(--text-primary); }
+
+  /* ===== 链路日志弹层 ===== */
+  #traceOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(51, 45, 36, 0.35);   /* 墨色半透明遮罩 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+  #traceOverlay.hidden { display: none; }
+  #traceModal {
+    width: min(920px, 92vw);
+    height: min(80vh, 720px);
+    background: var(--bg-page);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-pop);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #traceModalHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  #traceClose {
+    border: none;
+    background: none;
+    font-size: var(--fs-lg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-sm);
+  }
+  #traceClose:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  #traceBody {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-sm);
+  }
+  .trace-empty { color: var(--text-muted); text-align: center; padding: var(--sp-6) 0; }
+  .trace-back {
+    margin-bottom: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+    border: none;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    border-radius: var(--r-sm);
+  }
+  .trace-back:hover { background: var(--bg-accent-soft); }
+
+  /* 链路列表项 */
+  .trace-item {
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-surface);
+    margin-bottom: var(--sp-2);
+    cursor: pointer;
+  }
+  .trace-item:hover { border-color: var(--border-strong); }
+  .trace-item-title {
+    font-size: var(--fs-md);
+    color: var(--text-primary);
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trace-item-head {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+  .trace-badge {
+    font-size: var(--fs-xs);
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-full);
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+  }
+  .trace-badge.err { background: var(--bg-danger-soft); color: var(--danger); }
+  .trace-badge.sub { background: var(--bg-system-soft); color: var(--text-system); }
+
+  /* 链路详情 */
+  .trace-detail-head {
+    display: flex;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    margin-bottom: var(--sp-3);
+  }
+  .trace-round {
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-surface);
+    margin-bottom: var(--sp-2);
+  }
+  .trace-round summary, .trace-msg summary { cursor: pointer; user-select: none; }
+  .trace-round-head {
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .trace-round-body {
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+    border-top: 1px solid var(--border);
+  }
+  .trace-section-title { font-size: var(--fs-xs); color: var(--text-muted); margin: var(--sp-2) 0 var(--sp-1); }
+  .trace-msg {
+    border-left: 3px solid var(--border);
+    background: var(--bg-page);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    margin-bottom: var(--sp-1);
+  }
+  .trace-msg.role-system { border-left-color: var(--border-system); }
+  .trace-msg.role-user { border-left-color: var(--accent); }
+  .trace-msg.role-assistant { border-left-color: var(--success); }
+  .trace-msg.role-tool { border-left-color: var(--warning); }
+  .trace-msg-role { padding: var(--sp-1) var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); }
+  .trace-msg-content {
+    padding: 0 var(--sp-2) var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: var(--lh-base);
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .trace-reasoning {
+    background: var(--bg-subtle);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-sm);
+    padding: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .trace-tool {
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-page);
+    padding: var(--sp-2);
+    margin-bottom: var(--sp-1);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .trace-tool .trace-tool-meta { color: var(--text-muted); font-family: var(--font-sans); }
+  .trace-footer-text {
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-top: var(--sp-2);
+  }
 </style>
 </head>
 <body>
@@ -606,6 +797,7 @@
   <aside id="sidebar">
     <button id="newBtn">＋ 新建对话</button>
     <ul id="convList"></ul>
+    <button id="traceBtn" title="查看每次任务的完整执行链路">查看链路日志</button>
   </aside>
 
   <!-- ===== 右侧：聊天主区域 ===== -->
@@ -643,6 +835,17 @@
       </div>
     </footer>
   </main>
+
+  <!-- ===== 链路日志弹层（左下角"查看链路日志"按钮打开） ===== -->
+  <div id="traceOverlay" class="hidden">
+    <div id="traceModal">
+      <div id="traceModalHead">
+        <span>链路日志</span>
+        <button id="traceClose" title="关闭（Esc）">✕</button>
+      </div>
+      <div id="traceBody"></div>
+    </div>
+  </div>
 
 <!-- Markdown 渲染库 + 安全清洗库（都是本地文件，不需要联网加载） -->
 <script src="/static/marked.umd.js"></script>
@@ -701,6 +904,11 @@ const chatBox = document.getElementById("chat");
 const input = document.getElementById("input");
 const btn = document.getElementById("btn");
 const newBtn = document.getElementById("newBtn");
+// 链路日志相关
+const traceBtnEl = document.getElementById("traceBtn");       // 左下角入口按钮
+const traceOverlayEl = document.getElementById("traceOverlay"); // 弹层遮罩
+const traceBodyEl = document.getElementById("traceBody");      // 弹层内容区
+const traceCloseEl = document.getElementById("traceClose");    // 关闭按钮
 
 // ============================================================
 // 二、和后端打交道的小函数
@@ -1129,6 +1337,7 @@ async function sendMessage() {
         messages: fullHistory,
         workspace: conv.workspace || null,
         compaction: conv.compaction || null,   // 当前压缩状态（后端据此"应用"压缩）
+        conversation_id: conv.id,              // 链路日志用（标记这次任务是哪个会话的）
       }),
     });
     if (!res.ok || !res.body) {
@@ -1616,7 +1825,179 @@ function addCompactionCard(compaction) {
 }
 
 // ============================================================
-// 六、启动：页面打开时，先读状态，再画出界面
+// 六、链路日志（观测）：查看每次任务的完整执行链路
+// ------------------------------------------------------------
+// 数据由后端 tracing 模块记录（traces.jsonl），包含：
+//   每次任务里每一轮实际发给模型的上下文快照、模型思考过程、
+//   工具调用（参数/结果/耗时）、最终输出。
+// 接口：GET /api/traces（列表）、GET /api/traces/<id>（详情）
+// ============================================================
+
+function openTracePanel() {
+  traceOverlayEl.classList.remove("hidden");
+  showTraceList();
+}
+
+function closeTracePanel() {
+  traceOverlayEl.classList.add("hidden");
+}
+
+// 小工具：造一个带 class / 文本的元素（这一节的渲染都用它，省重复代码）
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// ---------- 链路列表 ----------
+async function showTraceList() {
+  traceBodyEl.innerHTML = "";
+  traceBodyEl.appendChild(el("div", "trace-empty", "正在读取链路…"));
+  try {
+    const res = await fetch("/api/traces");
+    const data = await res.json();
+    const traces = data.traces || [];
+    traceBodyEl.innerHTML = "";
+    if (!traces.length) {
+      traceBodyEl.appendChild(el("div", "trace-empty",
+        "还没有链路记录。发一条消息之后，这里就会出现完整执行链路。"));
+      return;
+    }
+    traces.forEach(function (t) { traceBodyEl.appendChild(buildTraceItem(t)); });
+  } catch (err) {
+    traceBodyEl.innerHTML = "";
+    traceBodyEl.appendChild(el("div", "trace-empty", "读取失败：确认后端服务在运行"));
+  }
+}
+
+function buildTraceItem(t) {
+  const item = el("div", "trace-item");
+  item.appendChild(el("div", "trace-item-title", t.user_preview || "（没有用户消息）"));
+  const head = el("div", "trace-item-head");
+  const ms = t.duration_ms || 0;
+  [t.started_at || "", "轮次 " + (t.rounds || 0), "耗时 " + (ms / 1000).toFixed(1) + "s"]
+    .forEach(function (x) { head.appendChild(el("span", "", x)); });
+  head.appendChild(el("span",
+    "trace-badge" + (t.status === "error" ? " err" : ""),
+    t.status === "error" ? "出错" : (t.status === "interrupted" ? "中断" : "完成")));
+  if (t.source === "subagent") head.appendChild(el("span", "trace-badge sub", "子代理"));
+  item.appendChild(head);
+  item.addEventListener("click", function () { showTraceDetail(t.id); });
+  return item;
+}
+
+// ---------- 链路详情 ----------
+async function showTraceDetail(id) {
+  traceBodyEl.innerHTML = "";
+  const back = el("button", "trace-back", "← 返回列表");
+  back.addEventListener("click", showTraceList);
+  traceBodyEl.appendChild(back);
+  try {
+    const res = await fetch("/api/traces/" + encodeURIComponent(id));
+    if (!res.ok) {
+      traceBodyEl.appendChild(el("div", "trace-empty", "没有找到这条链路（可能已被清理）"));
+      return;
+    }
+    const t = await res.json();
+    traceBodyEl.appendChild(buildTraceDetail(t));
+  } catch (err) {
+    traceBodyEl.appendChild(el("div", "trace-empty", "读取失败：确认后端服务在运行"));
+  }
+}
+
+function buildTraceDetail(t) {
+  const wrap = document.createElement("div");
+  const ms = t.duration_ms || 0;
+  const head = el("div", "trace-detail-head");
+  [
+    "时间：" + (t.started_at || "-"),
+    "耗时：" + (ms / 1000).toFixed(2) + "s",
+    "模型：" + (t.model || "-"),
+    "轮次：" + ((t.rounds || []).length),
+    "工作区：" + (t.workspace || "项目目录"),
+    "状态：" + (t.status === "ok" ? "完成" : (t.status || "-")),
+  ].forEach(function (x) { head.appendChild(el("span", "", x)); });
+  wrap.appendChild(head);
+
+  if (t.error) wrap.appendChild(el("div", "trace-reasoning", "错误：" + t.error));
+
+  (t.rounds || []).forEach(function (r) { wrap.appendChild(buildTraceRound(r)); });
+
+  if (t.final_text) {
+    wrap.appendChild(el("div", "trace-section-title", "最终输出"));
+    wrap.appendChild(el("div", "trace-footer-text", t.final_text));
+  }
+  return wrap;
+}
+
+function buildTraceRound(r) {
+  const d = document.createElement("details");
+  d.className = "trace-round";
+  if ((r.index || 0) === 0) d.open = true;   // 第一轮默认展开
+
+  d.appendChild(el("summary", "trace-round-head",
+    "第 " + ((r.index || 0) + 1) + " 轮 · " + (r.duration_ms || 0) + "ms · " +
+    "请求 " + (((r.request || {}).message_count) || 0) + " 条消息 · " +
+    "工具 " + ((r.tool_calls || []).length) + " 次"));
+
+  const body = el("div", "trace-round-body");
+
+  // ① 上下文结构（逐条消息，点开看全文）
+  const req = r.request || {};
+  const toolsText = (req.tools || []).join(", ") || "无";
+  body.appendChild(el("div", "trace-section-title",
+    "① 发给模型的上下文结构（" + (req.messages || []).length + " 条）· 工具：" + toolsText));
+  (req.messages || []).forEach(function (m) {
+    const msg = document.createElement("details");
+    msg.className = "trace-msg role-" + (m.role || "unknown");
+    const label = { system: "系统", user: "用户", assistant: "助手", tool: "工具结果" }[m.role]
+      || (m.role || "?");
+    const preview = (m.content || "").replace(/\n/g, " ").slice(0, 70);
+    const callsTag = m.tool_calls ? ("［调用 " + m.tool_calls.length + " 个工具］") : "";
+    msg.appendChild(el("summary", "trace-msg-role", label + callsTag + "：" + preview));
+
+    let content = m.content || "";
+    if (m.tool_calls) {
+      m.tool_calls.forEach(function (tc) {
+        content += "\n→ " + ((tc.function || {}).name || "?") +
+          "(" + ((tc.function || {}).arguments || "") + ")";
+      });
+    }
+    msg.appendChild(el("div", "trace-msg-content", content || "（空）"));
+    body.appendChild(msg);
+  });
+
+  // ② 思考过程
+  body.appendChild(el("div", "trace-section-title", "② 模型思考过程"));
+  body.appendChild(el("div", "trace-reasoning", r.reasoning || "（本轮没有思考内容）"));
+
+  // ③ 本轮输出
+  if (r.text) {
+    body.appendChild(el("div", "trace-section-title", "③ 模型输出（本轮）"));
+    body.appendChild(el("div", "trace-footer-text", r.text));
+  }
+
+  // ④ 工具调用
+  if ((r.tool_calls || []).length) {
+    body.appendChild(el("div", "trace-section-title", "④ 工具调用"));
+    r.tool_calls.forEach(function (c) {
+      const box = el("div", "trace-tool");
+      box.appendChild(el("div", "trace-tool-meta",
+        "工具：" + c.name + " · 耗时 " + (c.duration_ms || 0) + "ms · " +
+        (c.ok ? "成功" : "失败")));
+      box.appendChild(el("div", "", "参数：" + JSON.stringify(c.arguments || {})));
+      box.appendChild(el("div", "", "结果：" + (c.result || "")));
+      body.appendChild(box);
+    });
+  }
+
+  d.appendChild(body);
+  return d;
+}
+
+// ============================================================
+// 七、启动：页面打开时，先读状态，再画出界面
 // ============================================================
 async function init() {
   // 1. 从后端读取状态
@@ -1649,6 +2030,18 @@ async function init() {
 
 // ---------- 事件绑定 ----------
 newBtn.addEventListener("click", createConversation);
+
+// 链路日志：左下角按钮打开；关闭按钮 / 点遮罩 / Esc 都能关
+traceBtnEl.addEventListener("click", openTracePanel);
+traceCloseEl.addEventListener("click", closeTracePanel);
+traceOverlayEl.addEventListener("click", function (e) {
+  if (e.target === traceOverlayEl) closeTracePanel();
+});
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" && !traceOverlayEl.classList.contains("hidden")) {
+    closeTracePanel();
+  }
+});
 
 // 工作区标签：点开小菜单；菜单里的按钮分流到三种方式
 workspaceTagEl.addEventListener("click", toggleWorkspaceMenu);
