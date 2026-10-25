@@ -125,6 +125,8 @@ Key 在 https://platform.deepseek.com 创建，以 `sk-` 开头。
 | `write_file` | 创建 / 整体覆盖文件 |
 | `edit_file` | 精确修改文件（要求原文唯一出现，防止改错地方）|
 | `exec_command` | 在工作区里执行系统命令（跑脚本、git、查环境）|
+| `screenshot` | 用 Edge 无头模式给网页截图（存工作区的 `.screenshots/`）|
+| `view_image` | 读取工作区里的一张图片"看"一眼（多模态）|
 | `spawn_agent` | 派一个子代理独立干活（详见下方"子代理"小节）|
 
 对话时它可能连续调用好几个（先列目录 → 再读文件 → 再回答你），
@@ -204,6 +206,11 @@ Key 在 https://platform.deepseek.com 创建，以 `sk-` 开头。
 - 支持 JPEG / PNG / GIF / WebP，单张 ≤ 5 MB（`config.py` 的 `MAX_IMAGE_MB`）；
 - 每张图片约算 400 token（官方单图上限约 384）；
 - 总开关：`config.py` 里 `ENABLE_VISION = False` 可整体关掉图片输入。
+
+**agent 会自己截图检查效果**：模型有两个自检工具——`screenshot`（Edge 无头截图）
+和 `view_image`（把图片"看"回来）。所以让它做一个小游戏，它会：
+生成页面 → **截图** → **看图** → 发现"方块颜色不对/布局溢出" → 改 → 再截，
+而不是"写完就交卷"。
 
 ---
 

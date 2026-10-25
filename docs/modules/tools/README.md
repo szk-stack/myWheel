@@ -16,7 +16,8 @@
 |---|---|---|
 | **文件工具** | [list_dir](list_dir.md) / [read_file](read_file.md) / [write_file](write_file.md) / [edit_file](edit_file.md) | 都在**工作区**内操作（`safe_path` 锁定） |
 | **系统工具** | [exec_command](exec_command.md) | 在工作区执行系统命令（跑脚本、git、查环境）——**不受路径锁保护**，见其安全说明 |
-| **代理工具** | [spawn_agent](spawn_agent.md) | 派子代理独立干活（多 agent 积木） |
+| **视觉工具** | [view_image](view_image.md) / [screenshot](screenshot.md) | 看图与网页截图——agent 自检闭环（生成 → 截图 → 看图 → 修） |
+| **代理工具** | [spawn_agent](spawn_agent.md) | 派子代理独立干活（multi-agent 积木） |
 
 ## 2. 工具的"三段式"结构（每个工具文件都长这样）
 
@@ -74,6 +75,8 @@ register(DESCRIPTION, run)
 | [write_file](write_file.md) | 创建/整体覆盖文件 | 自动建父目录；会**整份替换** |
 | [edit_file](edit_file.md) | 精确查找替换 | `old_text` 必须**恰好出现一次**才动手 |
 | [exec_command](exec_command.md) | 执行系统命令 | 工作区 cwd；危险命令黑名单；60s 超时；输出截断 |
+| [screenshot](screenshot.md) | 网页截图 | Edge 无头模式；存工作区 `.screenshots/`；零依赖 |
+| [view_image](view_image.md) | 看图 | 图片经"附件槽"以 user 消息递回模型（官方限制） |
 | [spawn_agent](spawn_agent.md) | 派子代理干活 | 独立上下文；防套娃；完整过程可展开查看 |
 
 ## 6. 加一个新工具（完整示例）

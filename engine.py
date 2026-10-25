@@ -150,6 +150,10 @@ def _slim_message(m):
         for block in content:
             if isinstance(block, dict) and block.get("type") == "text":
                 slim_blocks.append({**block, "text": tracing.slim_text(block.get("text", ""))})
+            elif isinstance(block, dict) and block.get("type") == "image_url":
+                # 图片数据（base64）不进链路快照——用占位代替（否则一条 trace 能几 MB）
+                slim_blocks.append({"type": "image_url",
+                                    "image_url": {"url": "（图片数据已省略）"}})
             else:
                 slim_blocks.append(block)
         out["content"] = slim_blocks
@@ -339,6 +343,14 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                 # 它会跟着 tool_result 一起流向对前端和日志
                 extra = toolbox.take_attachments()
 
+                # ★ 工具"递图"给模型（view_image 专用）：附件里的图片数据
+                #   不能走 tool 消息（官方限制：图片只能放 user 消息），
+                #   先摘出来——下面回填历史时以一条 user 消息递回模型；
+                #   同时从 extra 里 pop 掉（base64 不进事件日志和链路快照）
+                image_for_model = None
+                if isinstance(extra, dict) and extra.get("image_for_model"):
+                    image_for_model = extra.pop("image_for_model")
+
                 # ★ 链路观测：工具调用（参数 / 结果 / 耗时）
                 round_record["tool_calls"].append({
                     "name": call["name"],
@@ -366,6 +378,20 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                     "tool_call_id": call["id"],
                     "content": result,
                 })
+
+                # ★ 图片递回：以一条 user 消息把图片交给模型（官方限制：
+                #   图片只能放 user 消息）。模型下一轮就能"看到"这张图。
+                if image_for_model:
+                    pic_path = arguments.get("path", "")
+                    work_messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text",
+                             "text": f"（这是工具 {call['name']} 读到的图片：{pic_path}）"},
+                            {"type": "image_url",
+                             "image_url": {"url": image_for_model}},
+                        ],
+                    })
 
         # ④ 循环结束：把完整回答交给 after_llm（记录类用途，前面解释过）
         ctx["reply"] = "".join(text_pieces)
