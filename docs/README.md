@@ -35,6 +35,7 @@
 | [modules/tools/](modules/tools/README.md) | 模块：工具系统（总览 + 每个工具一页） | **Stable** |
 | [modules/plugins/](modules/plugins/README.md) | 模块：插件系统（空槽机制 + 每个插件一页） | **Stable** |
 | [design/](design/frontend-audit-2026-10.md) | 设计文档：前端审计报告（2026-10，双评分 + 问题清单） | **Stable** |
+| [testing/](testing/coding-eval-plan.md) | 评测方案：coding 能力 12 道分层题 + 判定脚本 + 失败归类 | **Draft** |
 | modules/server/ | 模块：HTTP 服务（路由、SSE、静态文件） | 规划中 |
 | modules/frontend/ | 模块：前端（状态驱动渲染、流式显示） | 规划中 |
 | api/http.md · api/sse-events.md | 接口契约（HTTP 接口逐条 / SSE 事件协议） | 规划中 |
