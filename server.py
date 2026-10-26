@@ -226,23 +226,40 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         技术上这叫 SSE（Server-Sent Events）：响应不设置总长度，
         而是一个数据块一个数据块地"挤"出去，浏览器边收边显示。
+
+        ★ 关于"停止"：浏览器那头一 abort，这条 TCP 连接就断了。
+          我们下一次往它写数据时会抛 ConnectionError，于是跳出循环，
+          在 finally 里显式 close() 生成器——引擎随即被"掐断"。
         """
         try:
             self._start_sse()
+        except Exception:
+            return   # 连响应头都发不出去，这个请求已经废了
+
+        stream = None
+        try:
             # 边收边发：engine.chat_stream 是生成器，它吐出的本来就是
             # "事件字典"（文字增量 / 工具调用 / 工具结果），原样转发给浏览器，
             # 前端按里面的 type 字段分别处理
             # 注意：把前端传来的"工作区"一并交给引擎（None = 默认项目目录）
-            for event in engine.chat_stream(
+            stream = engine.chat_stream(
                 data.get("messages", []),
                 workspace=data.get("workspace"),
                 compaction=data.get("compaction"),   # 压缩状态（compact 插件要用）
                 conversation_id=data.get("conversation_id"),   # 链路日志用（哪个会话）
-            ):
+            )
+            for event in stream:
                 self._send_sse(event)
             self._end_sse()
+
+        except ConnectionError:
+            # ★ 浏览器点了"停止"，或者直接关了页面/刷新了：
+            #   这条连接已经没人读了。安静收工，不用（也没法）再回错误消息。
+            #   （BrokenPipe / ConnectionReset / ConnectionAborted 都属这一类）
+            pass
+
         except Exception as e:
-            # 出错了（比如还没填 Key、网络断了）：
+            # 真出错（比如还没填 Key、网络断了）：
             # 此时响应头已经发出去了，只能把错误也包成一条流消息发回去，
             # 前端收到后会把它显示出来。
             try:
@@ -250,6 +267,20 @@ class ChatHandler(BaseHTTPRequestHandler):
                 self._end_sse()
             except Exception:
                 pass
+
+        finally:
+            # ★ 关键的一步：显式关掉引擎的生成器。
+            #   不关的话，要等垃圾回收才触发 GeneratorExit——在那之前
+            #   引擎还可能一轮轮地调模型、调工具，钱照烧、工作区还在被改。
+            #   close() 会立刻把 GeneratorExit 抛进 engine 的循环，
+            #   它的 finally 把这次链路记成 interrupted。
+            #   （限制：如果此刻正在执行工具，要等工具自己跑完才停得下来，
+            #     因为 Python 生成器只能在 yield 的地方被打断。）
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
     def _start_sse(self):
         """发送流式响应的开头（响应头）。"""
