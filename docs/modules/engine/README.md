@@ -138,15 +138,19 @@ while True:
         elif event["type"] == "tool_calls":
             pending_calls = event["tool_calls"]               # 攒起来
     if not pending_calls: break                               # 答完了 → 收工
-    if used_rounds >= config.MAX_TOOL_ROUNDS:                 # 保险丝
-        print("警告…"); break
+    if config.MAX_TOOL_ROUNDS > 0 and used_rounds >= config.MAX_TOOL_ROUNDS:
+        print("警告…"); break                                 # 只在配了正数时生效
     used_rounds += 1
     ...（协议回填 + 逐个执行工具 + 结果回填，见下）
 ```
 
 要点：
 
-- **保险丝**先检查后自增：达到上限时，**当前这批**工具也不会执行（打警告收工）；
+- **轮次上限默认关闭**：`MAX_TOOL_ROUNDS = 0` 表示不限制（与 Pi / dsh 一致，让模型自己决定何时收工）；
+  配了正数才当保险丝用——先检查后自增，达到上限时**当前这批**工具也不会执行（打警告收工）。
+  ★ 已知缺陷：撞上限是"直接截断"，模型没机会说"我没做完"，链路日志还会记成 `ok`；
+- **真正的刹车是「停止」按钮**：前端 `AbortController` → 断连 → `server.py` 捕获
+  `ConnectionError` → `stream.close()` → 引擎的 `finally` 把链路记成 `interrupted`；
 - **协议回填**：执行前，先把"模型要求调工具"按官方格式记进工作历史
   （assistant 消息 + `tool_calls` 字段）；
 - 每个待执行的工具走四步：
@@ -223,9 +227,10 @@ assistant（content 空 + tool_calls 字段）  +  tool（tool_call_id + 结果�
 `hooks.py` 里加一个新列表（文件注释里留了示例位置），在 engine 流程里
 `hooks.run(新槽, ctx)` 一次，插件照常 `append`。
 
-### 调整工具轮数上限
+### 调整轮次上限（或关掉它）
 
-`config.py` 的 `MAX_TOOL_ROUNDS`。
+`config.py` 的 `MAX_TOOL_ROUNDS`：**0 = 不限制（默认）**；正数 = 最多连续调几轮工具。
+改完要重启服务才生效。
 
 ### 想要"每轮工具执行前后的中间件"
 

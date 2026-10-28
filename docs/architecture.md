@@ -119,7 +119,10 @@ flowchart TB
       └─► 模型要求用工具 → 执行工具 → 结果塞回历史 → 再调模型 → …
 ```
 
-- 保险丝：连续工具轮数超过 `MAX_TOOL_ROUNDS`（config）就停，防死循环烧钱。
+- 轮次：默认**不限制**（`MAX_TOOL_ROUNDS = 0`，与 Pi / dsh 一致，让模型自己决定何时收工）；
+  填正数才当保险丝，撞上限直接截断（已知待改进：不给模型收尾机会，链路日志还记 `ok`）。
+- 中断：前端「停止」→ `AbortController` → 断连 → `server.py` 捕获 `ConnectionError`
+  → `stream.close()` → 引擎 `finally` 把这次链路记成 `interrupted`。
 - 流式产出的事件（路由到前端）：`text` / `tool_call` / `tool_result` / `compacted`。
 - 历史里的工具记录发给模型前会转成标准协议对（`assistant(tool_calls)` + `tool`），
   这样模型"记得"自己读过什么（细节见 [modules/engine](modules/engine/README.md) §4.4）。

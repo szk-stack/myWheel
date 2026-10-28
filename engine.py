@@ -297,8 +297,12 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
             if not pending_calls:
                 break    # 模型正常答完了 → 收工
 
-            # 保险丝：模型连续调工具的轮数超上限就停（防死循环烧钱）
-            if used_rounds >= config.MAX_TOOL_ROUNDS:
+            # 轮次计数：MAX_TOOL_ROUNDS 为 0 = 不限制（默认）——让模型自己
+            # 决定什么时候收工，和 Pi / dsh 的做法一致；
+            # 配了正数才当保险丝用（防死循环烧钱）。
+            # ★ 注意：撞上限是"直接截断"，模型没机会说"我没做完"——
+            #   这个行为等闸门方案定了再改（现在默认 0，走不到这里）。
+            if config.MAX_TOOL_ROUNDS > 0 and used_rounds >= config.MAX_TOOL_ROUNDS:
                 print(f"[警告] 工具调用达到上限（{config.MAX_TOOL_ROUNDS} 轮），停止继续执行")
                 break
             used_rounds += 1
