@@ -327,13 +327,28 @@ def search(keyword, limit=15, order="totalrank", min_minutes=0):
 
     min_seconds = int(min_minutes or 0) * 60
     out, page = [], 1
+    retried_risk = False
 
     while len(out) < limit and page <= 3:
-        data = _search_page(keyword, page, order) or {}
+        try:
+            data = _search_page(keyword, page, order) or {}
+        except Exception as e:
+            # ★ 这条经验抄自 dsh-bilibili（moxingovo 的 B站插件）：
+            #   B站会**定向风控默认的综合排序**，而 pubdate 排序通常放行。
+            #   所以撞风控时换排序重试一次，比干等或原样重试有效。
+            #   只在调用方没显式指定排序时降级，免得改掉用户的选择。
+            if not retried_risk and order == "totalrank" and _is_risk(e):
+                retried_risk = True
+                order = "pubdate"
+                continue
+            raise
+
         items = data.get("result") or []
         if not items:
             break
         for it in items:
+            if not it.get("bvid"):
+                continue          # 搜索里会混进没有 BV 号的广告位，取不了
             seconds = parse_duration(it.get("duration"))
             if min_seconds and seconds < min_seconds:
                 continue
