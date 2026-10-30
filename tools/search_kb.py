@@ -24,6 +24,22 @@ MAX_CHUNK_CHARS = 1200
 MAX_TOTAL_CHARS = getattr(config, "KB_MAX_OUTPUT", 4000)
 
 
+def _retrieve(query, top_k):
+    """检索：优先用混合（BM25 + 向量 + RRF），任何一环不可用就逐级降级。
+
+    降级链：混合 → 纯关键词 → 报错
+    降级的原因可能是：没装 numpy、没建向量索引、没填百炼 Key、接口挂了。
+    这些都不该让"查文档"这个功能整个不可用。
+    """
+    try:
+        import kb_vector
+        hits, mode = kb_vector.hybrid_search(query, top_k)
+        return hits, mode
+    except Exception:
+        # 向量那一路出任何问题（网络、Key、没建索引），都退回关键词检索
+        return (rag.search(query, top_k) or []), "bm25"
+
+
 # ---- ① 工具说明书 ----
 DESCRIPTION = {
     "name": "search_kb",
@@ -68,15 +84,15 @@ def run(arguments):
     except (TypeError, ValueError):
         top_k = None
 
-    hits = rag.search(query, top_k)
-
-    # 索引还没建
-    if hits is None:
+    # 索引还没建（关键词索引是地基，没有它两个检索都跑不了）
+    if rag.load_index() is None:
         return (
             "知识库索引不存在。请让用户在项目目录下运行：\n"
             "    python rag.py build\n"
             "建好索引后再检索。"
         )
+
+    hits, mode = _retrieve(query, top_k)
 
     if not hits:
         info = rag.stats() or {}
@@ -88,9 +104,10 @@ def run(arguments):
 
     # ---- 拼装结果 ----
     info = rag.stats() or {}
+    mode_label = "混合检索" if mode == "hybrid" else "关键词检索"
     lines = [
         f"知识库检索「{query}」命中 {len(hits)} 块"
-        f"（全库 {info.get('chunks', '?')} 块 / {info.get('files', '?')} 个文件）：",
+        f"（{mode_label} · 全库 {info.get('chunks', '?')} 块 / {info.get('files', '?')} 个文件）：",
         "",
     ]
 
