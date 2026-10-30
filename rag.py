@@ -278,7 +278,13 @@ def split_file(text, source):
 # ============================================================
 
 def _collect_files():
-    """找出所有要进知识库的文件。"""
+    """找出所有要进知识库的文件。
+
+    KNOWLEDGE_SOURCES 里每一项可以是**目录**，也可以是**单个文件**。
+    为什么要支持单文件：根目录的 README.md 是最重要的文档之一（安装步骤、
+    常见问题都在里面），但它既不在 docs/ 也不在 knowledge/ 下——
+    只扫目录的话它会被漏掉，而"端口被占用怎么办"这种问题就永远检索不到。
+    """
     sources = getattr(config, "KNOWLEDGE_SOURCES", ["docs", "knowledge"])
     files = []
 
@@ -286,6 +292,14 @@ def _collect_files():
         base = ROOT / src
         if not base.exists():
             continue
+
+        # 单个文件：直接收，不递归
+        if base.is_file():
+            if base.suffix.lower() in SUFFIXES:
+                files.append(base)
+            continue
+
+        # 目录：递归找
         for p in sorted(base.rglob("*")):
             if not p.is_file() or p.suffix.lower() not in SUFFIXES:
                 continue

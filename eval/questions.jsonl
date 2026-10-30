@@ -1,0 +1,30 @@
+{"id": "q01", "q": "上下文压缩是在用量达到窗口多少比例的时候触发的？", "expect": [{"src": "docs/modules/plugins/compact.md", "h": "触发条件"}], "kind": "fact"}
+{"id": "q02", "q": "写一个新工具需要照抄哪三段结构？", "expect": [{"src": "docs/modules/tools/README.md", "h": "三段式"}], "kind": "how"}
+{"id": "q03", "q": "为什么服务必须用 ThreadingHTTPServer，不能用普通的？", "expect": [{"src": "docs/architecture.md", "h": "核心机制"}, {"src": "docs/modules/engine/README.md", "h": ""}], "kind": "why"}
+{"id": "q04", "q": "子代理为什么不能再派子代理？", "expect": [{"src": "docs/modules/tools/spawn_agent.md", "h": "设计决策"}], "kind": "why"}
+{"id": "q05", "q": "edit_file 怎么保证不会改错地方？", "expect": [{"src": "docs/modules/tools/edit_file.md", "h": "唯一性"}], "kind": "how"}
+{"id": "q06", "q": "图片为什么要绕一圈通过附件槽递给模型？", "expect": [{"src": "docs/modules/tools/view_image.md", "h": "附件槽"}], "kind": "why"}
+{"id": "q07", "q": "工作区是谁设定的，模型能自己改吗？", "expect": [{"src": "docs/modules/toolbox/README.md", "h": "工作区"}, {"src": "docs/architecture.md", "h": "沙箱"}], "kind": "where"}
+{"id": "q08", "q": "事件日志为什么要从头回放一遍才能拿到状态？", "expect": [{"src": "docs/architecture.md", "h": "事件日志"}, {"src": "docs/modules/storage/README.md", "h": ""}], "kind": "why"}
+{"id": "q09", "q": "流式输出的时候前端为什么不重绘整个气泡？", "expect": [{"src": "docs/architecture.md", "h": "关键流程"}, {"src": "docs/design/frontend-audit-2026-10.md", "h": ""}], "kind": "why"}
+{"id": "q10", "q": "exec_command 的安全边界到底能管住什么、管不住什么？", "expect": [{"src": "docs/modules/tools/exec_command.md", "h": "安全边界"}], "kind": "where"}
+{"id": "q11", "q": "有时候能看到模型的思考过程，有时候看不到，为什么？", "expect": [{"src": "docs/modules/tracing/README.md", "h": "已知限制"}], "kind": "colloquial"}
+{"id": "q12", "q": "SSE 流是一行一行怎么解析出来的？", "expect": [{"src": "docs/modules/llm/README.md", "h": "内部实现"}], "kind": "how"}
+{"id": "q13", "q": "空槽机制一共留了几个槽？", "expect": [{"src": "docs/modules/plugins/README.md", "h": "空槽机制"}], "kind": "fact"}
+{"id": "q14", "q": "压缩之后原来的聊天记录还在吗？", "expect": [{"src": "docs/modules/plugins/compact.md", "h": "职责"}, {"src": "docs/modules/plugins/compact.md", "h": "联动"}], "kind": "colloquial"}
+{"id": "q15", "q": "切文档的时候为什么相邻两块要留一段重叠？", "expect": [{"src": "docs/design/rag-plan-2026-10.md", "h": "切分"}], "kind": "why"}
+{"id": "q16", "q": "向量检索为什么比关键词检索慢那么多？", "expect": [{"src": "docs/design/rag-plan-2026-10.md", "h": "第二个实验"}], "kind": "why"}
+{"id": "q17", "q": "两路结果融合的时候为什么只看名次不看分数？", "expect": [{"src": "docs/design/rag-plan-2026-10.md", "h": "融合"}], "kind": "why"}
+{"id": "q18", "q": "知识库里的资料是从哪里来的？", "expect": [{"src": "docs/design/rag-plan-2026-10.md", "h": "数据从哪来"}], "kind": "where"}
+{"id": "q19", "q": "我想加一个新工具，完整步骤是什么？", "expect": [{"src": "docs/modules/tools/README.md", "h": "加一个新工具"}], "kind": "how"}
+{"id": "q20", "q": "网页截图用的是哪个浏览器，需要另外安装驱动吗？", "expect": [{"src": "docs/modules/tools/screenshot.md", "h": "职责"}, {"src": "docs/modules/tools/README.md", "h": "速览"}], "kind": "fact"}
+{"id": "q21", "q": "子代理干活的过程在前端哪里能点开看？", "expect": [{"src": "docs/modules/tools/spawn_agent.md", "h": "过程脚印"}], "kind": "where"}
+{"id": "q22", "q": "为什么算上下文用量的时候要额外预留一部分固定开销？", "expect": [{"src": "docs/modules/plugins/compact.md", "h": "用量估算"}], "kind": "why"}
+{"id": "q23", "q": "我的 API Key 会不会泄露出去？", "expect": [{"src": "README.md", "h": "常见问题"}], "kind": "colloquial"}
+{"id": "q24", "q": "端口被别的程序占了怎么改？", "expect": [{"src": "README.md", "h": "常见问题"}], "kind": "colloquial"}
+{"id": "q25", "q": "工具出错时为什么要把错误信息原样返回给模型？", "expect": [{"src": "docs/modules/tools/README.md", "h": "约定"}], "kind": "why"}
+{"id": "q26", "q": "到底什么是空槽？", "expect": [{"src": "docs/modules/plugins/README.md", "h": "空槽机制"}], "kind": "what"}
+{"id": "q27", "q": "写技术文档要遵守哪些规范？", "expect": [{"src": "docs/README.md", "h": "写作规范"}], "kind": "what"}
+{"id": "q28", "q": "前端改样式的时候为什么不允许直接写颜色值？", "expect": [{"src": "docs/design/frontend-audit-2026-10.md", "h": "问题清单"}, {"src": "docs/design/frontend-audit-2026-10.md", "h": "改造"}], "kind": "why"}
+{"id": "q29", "q": "链路日志里到底记了哪些东西？", "expect": [{"src": "docs/modules/tracing/README.md", "h": "存储"}], "kind": "what"}
+{"id": "q30", "q": "聊太久了会不会把前面的内容忘掉？", "expect": [{"src": "docs/modules/plugins/compact.md", "h": "职责"}, {"src": "docs/modules/plugins/compact.md", "h": "触发条件"}], "kind": "colloquial"}

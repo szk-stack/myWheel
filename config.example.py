@@ -129,7 +129,10 @@ SUBAGENT_PROMPT = """你是主 agent 派出的子代理（探子）。
 ENABLE_KB = True
 
 # 哪些目录要进知识库（相对项目根目录）
-KNOWLEDGE_SOURCES = ["docs", "knowledge"]
+# 可以是目录，也可以是单个文件。
+# 根目录的 README 要单独列——它不在 docs/ 下，只扫目录会漏掉，
+# 而安装步骤、常见问题这些恰恰都在里面。
+KNOWLEDGE_SOURCES = ["docs", "knowledge", "README.md"]
 
 # 每块最多多少字符
 KB_CHUNK_MAX = 800
