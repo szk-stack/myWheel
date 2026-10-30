@@ -75,7 +75,7 @@ register(DESCRIPTION, run)
 | [write_file](write_file.md) | 创建/整体覆盖文件 | 自动建父目录；会**整份替换** |
 | [edit_file](edit_file.md) | 精确查找替换 | `old_text` 必须**恰好出现一次**才动手 |
 | [exec_command](exec_command.md) | 执行系统命令 | 工作区 cwd；危险命令黑名单；60s 超时；输出截断 |
-| [screenshot](screenshot.md) | 网页截图 | Edge 无头模式；存工作区 `.screenshots/`；零依赖 |
+| [screenshot](screenshot.md) | 网页截图 | Edge 无头模式；存工作区 `.screenshots/`；不用另外装驱动 |
 | [view_image](view_image.md) | 看图 | 图片经"附件槽"以 user 消息递回模型（官方限制） |
 | [spawn_agent](spawn_agent.md) | 派子代理干活 | 独立上下文；防套娃；完整过程可展开查看 |
 

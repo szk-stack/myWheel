@@ -165,7 +165,7 @@ EMBED_DIM = 1024
 # 一次最多送几条文本（v4 的限制是 10 条）
 EMBED_BATCH = 10
 
-# 接口地址（OpenAI 兼容格式，不用装阿里云 SDK）
+# 接口地址（OpenAI 兼容格式，请求体就是标准 JSON）
 EMBED_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
 
 # 两路召回各取前几名去融合

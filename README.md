@@ -1,7 +1,7 @@
 # myWheel
 
 一个**零框架**的极简 Agent：agent 循环、工具系统、插件机制、事件日志全部从零手写，
-后端只用 Python 标准库，不套 LangChain 那类框架——**因为目的是看清楚每一步到底发生了什么**。
+后端是 Python，核心逻辑手写，不套 LangChain 那类框架——**因为目的是看清楚每一步到底发生了什么**。
 
 > 名字是"我的轮子"：做这个项目本身就是在重复造轮子。
 > 造轮子不为替代谁，只为在造的过程中搞明白它到底怎么转。
@@ -11,7 +11,7 @@
 **它能做什么**
 
 - 前端：一个网页（`static/index.html`），流式打字机输出
-- 后端：纯 Python 标准库，装了 Python 就能跑
+- 后端：Python，核心逻辑手写
 - 大模型：DeepSeek（任何 OpenAI 兼容的接口都可以换）
 - 架构：**空槽 + 插件**，以后加功能就往 `plugins/` 里扔文件
 - 数据：**事件日志**（`data.jsonl`，只追加不重写）——思路学自开源项目 Pi
@@ -52,7 +52,7 @@ Key 在 https://platform.deepseek.com 创建，以 `sk-` 开头。
 上面三步跑完就已经能用了。想要"模型能查项目文档"再往下走：
 
 ```bash
-python -m pip install numpy jieba     # 只有知识库需要，核心功能不依赖
+python -m pip install numpy jieba     # 只有知识库需要
 python rag.py build                   # 建关键词索引（不联网，秒级）
 ```
 

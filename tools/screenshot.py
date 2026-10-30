@@ -2,7 +2,7 @@
 工具：screenshot —— 用 Edge 无头模式给网页截图
 
 Windows 自带 Edge（Chromium 内核），headless 模式可以在命令行截图——
-不装任何东西、不弹浏览器窗口、零第三方依赖。
+不弹浏览器窗口，也不用另外装浏览器驱动。
 
 截图存到工作区的 .screenshots/ 目录（隐藏目录，list_dir 不会列出它，
 不会干扰模型浏览工作区）。截完想"看"效果，接着调 view_image。

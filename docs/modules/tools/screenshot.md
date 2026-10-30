@@ -48,6 +48,6 @@
 - **`.screenshots/` 是隐藏目录**：`list_dir` 跳过 `.` 开头的目录，
   不会干扰模型浏览工作区；截图文件不自动清理（小文件，手动删即可）；
 - **只截"静态一帧"**：截图是某个时刻的画面，不能验证交互行为
-  （点击、键盘操作需要更重的方案，如 Playwright——超出零依赖范围）；
+  （点击、键盘操作需要更重的方案，如 Playwright——本工具没做这一层）；
 - Edge 路径按常见安装位置探测（`Program Files (x86)` / `Program Files` /
   PATH 里的 `msedge`）；换浏览器需改 `EDGE_CANDIDATES`。

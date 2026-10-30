@@ -19,7 +19,7 @@
 
 ## 2. 在系统中的位置
 
-只依赖标准库（`json` / `urllib`）和 `config.py`（Key / 地址 / 模型名）；
+用标准库（`json` / `urllib`）和 `config.py`（Key / 地址 / 模型名）实现；
 被 `engine.py`（主对话与子代理）和 `plugins/compact.py`（摘要）调用。
 
 ```mermaid
@@ -149,7 +149,7 @@ delta.tool_calls[0] = {"index": 0, "function": {"arguments": "\"a.md\"}" }}
 
 ## 6. 设计决策
 
-- **手写 SSE 解析，不用官方 SDK**（将归档为 ADR-011）：坚守"零第三方依赖"底线；
+- **手写 SSE 解析，不用官方 SDK**（将归档为 ADR-011）：少一层依赖，也能看清 SSE 协议本身；
   DeepSeek 兼容 OpenAI 格式，手写解析只有几十行，协议细节完全可见（教学价值）。
 - **用生成器，而不是回调函数**：调用方 `for event in ...` 直接消费——
   转发（server）、收集（子代理）都能做到，且**引擎可以被嵌套消费**
