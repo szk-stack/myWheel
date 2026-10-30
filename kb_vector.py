@@ -229,11 +229,13 @@ def build(force=False, verbose=True):
     )
 
     if verbose:
-        cost = len(chunks) * 800 / 1000 * 0.0005 / 1000  # 粗估
+        # 中文粗估：1 个字约等于 1 个 token，0.0005 元 / 千 token
+        total_chars = sum(len(t) for t in texts)
+        cost = total_chars / 1000 * 0.0005
         print(f"\n完成：{matrix.shape[0]} 块 × {matrix.shape[1]} 维，"
               f"耗时 {time.time() - started:.1f} 秒")
         print(f"落盘：{VEC_FILE.name}（{VEC_FILE.stat().st_size / 1024 / 1024:.1f} MB）")
-        print(f"本次大约花费 {cost:.4f} 元（免费额度内不扣）")
+        print(f"本次大约花费 {cost:.3f} 元（粗估；免费额度内不扣钱）")
 
 
 # ============================================================
