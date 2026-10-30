@@ -174,5 +174,75 @@ EMBED_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
 # 两路召回各取前几名去融合
 RECALL_TOP = 30
 
+# ===== 视频分析（B站 → 文字）=====
+
+# 总开关：True = 模型多出 video_search / video_fetch / video_transcribe 三个工具
+ENABLE_VIDEO = True
+
+# B站 cookie（可选）
+# 不填也能用：搜索、视频信息、音频流都免登录。
+# 填了才看得到 **AI 字幕**（未登录时字幕接口返回空数组）。
+# 怎么拿：浏览器登录 B站 → F12 → 应用/存储 → Cookie →
+#         复制 SESSDATA 那一项，写成 "SESSDATA=xxxxx" 即可。
+VIDEO_BILI_COOKIE = ""
+
+# 单个视频的时长上限（分钟）：超过就拒绝，避免一个 3 小时的视频把对话卡死
+VIDEO_MAX_MINUTES = 120
+
+# 转写后端：
+#   voice2text —— 调用本机的 voice2text 服务（D:\project\voice2text）。
+#                 它自带 Python 运行时、faster-whisper、cuDNN 和 ffmpeg，
+#                 按 cuda + large-v3-turbo 配好了 —— 白捡一个调好的 GPU 后端。
+#   local      —— 项目内自己跑 faster-whisper（要求 pip install，无 GPU 加速）
+ASR_BACKEND = "voice2text"
+
+# voice2text 服务地址（它的 set.ini 里 web_address 那一行）
+VOICE2TEXT_URL = "http://127.0.0.1:9977"
+
+# voice2text 的启动程序（服务没开时自动拉起；不想自动启动就把下一行设 False）
+VOICE2TEXT_EXE = r"D:\project\voice2text\start.exe"
+VOICE2TEXT_AUTOSTART = True
+
+# 用它里面哪个模型（它的 model_list 里的名字）
+VOICE2TEXT_MODEL = "large-v3-turbo"
+
+# ---- 以下只在 ASR_BACKEND = "local" 时才用 ----
+
+# 转写模型：先看 ASR_MODEL_DIR，没有才按名字找（tiny/base/small/medium/large-v3）
+ASR_MODEL_SIZE = "small"
+
+# 本地模型目录（绝对路径）。填了就优先用它，不再按名字下载。
+# 例：D:\project\voice2text\models\models--mobiuslabsgmbh--faster-whisper-large-v3-turbo\snapshots\<hash>
+ASR_MODEL_DIR = ""
+
+# 设备：auto = 能用 CUDA 就用，否则 CPU；也可强制 cpu / cuda
+# 注意：ctranslate2 的 CUDA 需要 CUDA 12 + cuDNN 9，缺了会自动退回 CPU
+ASR_DEVICE = "auto"
+
+# GPU 算力类型：float16（显存占用中等、速度快）；CPU 上固定用 int8
+ASR_COMPUTE_TYPE = "float16"
+
+# CUDA 运行库所在目录（可选，Windows 用）
+# 如果 cublas/cudnn 是 pip 装的（在 site-packages\nvidia\*\bin），
+# 或想借用某个打包应用自带的库，把目录写在这里
+CUDA_DLL_DIRS = []
+
+# ffmpeg 所在目录（可选）。为空则用系统 PATH 里的 ffmpeg。
+# 抽帧、转码要用；只做转写不需要它。
+FFMPEG_DIR = ""
+
+# 领域词表（专有名词，逗号分隔）：能显著减少专名错字
+# 例："RAG,向量检索,召回率,重排"
+ASR_HOTWORDS = ""
+
+# 确定性纠错表：稳定复现的错字，用"错=对"成对写，逗号分隔
+# 例："REG=RAG,GBT-4O=GPT-4o"
+# ★ 它是**不看上下文**的粗暴替换，只放你确认没歧义的
+ASR_FIXES = ""
+
+# 下载模型的镜像站。国内直连 huggingface.co 基本不通，所以默认走镜像；
+# 能直连的话把它改成 "" 即可
+HF_ENDPOINT = "https://hf-mirror.com"
+
 # 网页服务端口（如果启动时提示端口被占用，把 8000 改成 8001 再试）
 PORT = 8000
