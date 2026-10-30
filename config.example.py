@@ -113,5 +113,28 @@ KB_TITLE_WEIGHT = 3
 # 检索结果一次最多塞多少字符（防止把模型上下文撑爆）
 KB_MAX_OUTPUT = 4000
 
+# ===== 向量检索（第二路召回，用阿里云百炼）=====
+#
+# 向量这一环必须另找一家：DeepSeek 和 Anthropic 都不提供 embedding 接口。
+#
+# 怎么拿 Key：
+#   1. 打开 https://bailian.console.aliyun.com 开通百炼（免费，送 100 万 token）
+#   2. 右上角「API-KEY」→ 创建
+#   3. 填到下面（是百炼的 API-KEY，不是阿里云主账号的 AccessKey）
+DASHSCOPE_API_KEY = ""
+
+# 向量模型与维度
+EMBED_MODEL = "text-embedding-v4"
+EMBED_DIM = 1024
+
+# 一次最多送几条文本（v4 的限制是 10 条）
+EMBED_BATCH = 10
+
+# 接口地址（OpenAI 兼容格式，不用装阿里云 SDK）
+EMBED_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+
+# 两路召回各取前几名去融合
+RECALL_TOP = 30
+
 # 网页服务端口（如果启动时提示端口被占用，把 8000 改成 8001 再试）
 PORT = 8000
