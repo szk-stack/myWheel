@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>简</title>
+<title>myWheel</title>
 <style>
   /* ============================================================
-     设计 token 体系（「简」的设计地基 · "纸墨"版）
+     设计 token 体系（myWheel 的设计地基 · "纸墨"版）
      ------------------------------------------------------------
      两层结构（大厂设计系统的标准做法）：
        ① 原始层（--n / --p / --d / --s / --w / --y）：色板的字面值，
@@ -1902,7 +1902,7 @@ function renderMessages() {
 
   // 空会话 → 显示一句欢迎语
   if (!conv || conv.messages.length === 0) {
-    addBubble("ai", "你好！我是「简」。现在数据用「事件日志」来记（跟 Pi 学的），聊两句试试～");
+    addBubble("ai", "你好！这里是 myWheel。现在数据用「事件日志」来记（跟 Pi 学的），聊两句试试～");
   }
 
   // 正在等回复 → 显示"思考中…"（把元素引用记下来，流式回答会直接改它的文字）
