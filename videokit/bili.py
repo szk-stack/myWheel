@@ -141,6 +141,94 @@ def sign(params):
     return clean
 
 
+_buvid_ok = False
+
+
+def ensure_buvid():
+    """拿一个 buvid3 设备标识，塞进会话 cookie。
+
+    ★ 这是搜索接口的**硬门槛**，不加会直接吃 HTTP 412（Precondition Failed）。
+      412 不是业务错误码，是 WAF 在 HTTP 层拦掉的——所以它不会返回
+      {"code": -xxx}，而是 requests 抛 HTTPError，很容易被误当成网络问题。
+      好消息是免登录就能领：/x/frontend/finger/spi 会给 b_3 / b_4。
+    """
+    global _buvid_ok
+    s = session()
+    if _buvid_ok or s.cookies.get("buvid3"):
+        _buvid_ok = True
+        return
+
+    try:
+        d = _get("/x/frontend/finger/spi", ok_codes=(0,)) or {}
+        b3, b4 = d.get("b_3"), d.get("b_4")
+        if b3:
+            s.cookies.set("buvid3", b3, domain=".bilibili.com")
+            if b4:
+                s.cookies.set("buvid4", b4, domain=".bilibili.com")
+            _buvid_ok = True
+    except Exception:
+        pass   # 领不到就照常走，失败时由调用方给出人话解释
+
+
+def _is_412(exc):
+    return "412" in str(exc)
+
+
+def _is_risk(exc):
+    """判断是不是"被风控挡了"，而不是真的没数据。
+
+    两种形态都要认：
+      - HTTP 412 Precondition Failed —— WAF 在 HTTP 层拦的，requests 抛异常
+      - BiliError code=-352「风控校验失败」—— 接口层拦的
+    """
+    return _is_412(exc) or getattr(exc, "code", None) == -352
+
+
+def _get_guarded(path, params, signed=True, retries=1):
+    """带 buvid + 一次退避重试的 GET。
+
+    ★ 实测结论（2026-10-30，反复试过才敢写）：
+      - 缺 buvid3 时，`search/type` 必挂 412；补上就稳——这是**真 bug**，已修；
+      - 但 `space/wbi/arc/search`（UP 主作品列表）是另一套更强的风控，
+        补 buvid、换签名、换 Referer、退避 2/4 秒都只能偶尔过，
+        连续打几次之后会长时间返回 412 / -352。
+      → 所以这里只留**一次**退避重试（捞一下偶发抖动），
+        再往上加次数只是白等，真正的解法是配 `VIDEO_BILI_COOKIE`。
+    """
+    global _buvid_ok
+    ensure_buvid()
+
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            return _get(path, params, signed=signed)
+        except Exception as e:
+            if not _is_risk(e):
+                raise
+            last = e
+            if attempt < retries:
+                time.sleep(2.0)
+                _buvid_ok = False          # 顺手换一个设备标识
+                ensure_buvid()
+    raise last
+
+
+def _search_api(search_type, keyword, page, order=None):
+    """搜索接口的统一入口：管签名、管 buvid、失败自动降级。
+
+    B站的搜索对签名其实不敏感（带不带都能返回），但对 buvid3 极敏感。
+    所以策略是：带签名试 → 失败退不签名 → 仍被风控就重新领 buvid 再来。
+    """
+    params = {"search_type": search_type, "keyword": keyword, "page": page}
+    if order:
+        params["order"] = order
+
+    try:
+        return _get_guarded("/x/web-interface/search/type", params, signed=True)
+    except BiliError:
+        return _get_guarded("/x/web-interface/search/type", params, signed=False)
+
+
 # ------------------------------------------------------------
 # 地址解析与元信息
 # ------------------------------------------------------------
@@ -224,12 +312,7 @@ def _clean_title(text):
 
 
 def _search_page(keyword, page, order):
-    params = {"search_type": "video", "keyword": keyword, "page": page, "order": order}
-    try:
-        return _get("/x/web-interface/search/type", params, signed=True)
-    except BiliError:
-        # 签名偶尔会被判失效，退回不签名的老接口（实测仍可用）
-        return _get("/x/web-interface/search/type", params)
+    return _search_api("video", keyword, page, order)
 
 
 def search(keyword, limit=15, order="totalrank", min_minutes=0):
@@ -278,13 +361,7 @@ def search_user(keyword, limit=5):
     if not keyword:
         raise ValueError("UP 主名不能为空")
 
-    data = (
-        _get(
-            "/x/web-interface/search/type",
-            {"search_type": "bili_user", "keyword": keyword, "page": 1},
-        )
-        or {}
-    )
+    data = _search_api("bili_user", keyword, 1) or {}
     items = data.get("result") or []
     return [
         {
@@ -302,7 +379,7 @@ def user_videos(mid, limit=15, order="pubdate"):
     out, page = [], 1
     while len(out) < limit and page <= 5:
         data = (
-            _get(
+            _get_guarded(
                 "/x/space/wbi/arc/search",
                 {"mid": mid, "ps": 30, "pn": page, "order": order},
                 signed=True,

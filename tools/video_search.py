@@ -27,7 +27,12 @@ DESCRIPTION = {
             "query": {"type": "string", "description": "关键词，如「RAG 原理」"},
             "author": {
                 "type": "string",
-                "description": "UP 主名字或 mid（空间地址 bilibili.com/space/<mid> 里那串数字）",
+                "description": (
+                    "UP 主名字或 mid（bilibili.com/space/<mid> 里那串数字）。"
+                    "★ 这条路径不够稳：B站对 UP 作品列表接口有强风控，"
+                    "没有 cookie 时常被拦（412/-352）。除非用户明确要某个 UP 主的全部作品，"
+                    "否则优先用 query 按主题搜。"
+                ),
             },
             "limit": {"type": "integer", "description": "返回几条（默认 15，最多 30）"},
             "min_minutes": {
@@ -90,10 +95,31 @@ def run(arguments):
         if author:
             # 名字 → mid；已经是数字就直接用
             mid = author
+            uname = author          # 真实昵称拿到后会用搜索结果覆盖
+            note = ""
             if not author.isdigit():
-                users = bili.search_user(author, limit=5)
+                try:
+                    users = bili.search_user(author, limit=5)
+                except Exception as e:
+                    users = []
+                    note = f"UP 主搜索不可用（{str(e)[:60]}）；"
+
                 if not users:
-                    return f"错误：没搜到叫「{author}」的 UP 主"
+                    # ★ 降级而不是报错：名字定位不到时，按关键词搜视频。
+                    #   理由见文件顶部——把"要不要重试"的判断留在模型手里，
+                    #   它只会换 limit 数字反复撞同一堵墙。
+                    items = bili.search(
+                        author, limit=limit, order="totalrank", min_minutes=min_minutes
+                    )
+                    if not items:
+                        return f"错误：没搜到「{author}」相关的 UP 主或视频，换个说法或给个 BV号试试"
+                    return (
+                        f"{note}没定位到「{author}」这个 UP 主，已按**关键词**搜视频，"
+                        f"结果里可能包含 TA 的作品：\n\n{_table(items)}\n\n"
+                        "→ 找到目标后把 BV号 传给 video_fetch。"
+                        "如果确实要 TA 的全部作品，给我空间地址里的 mid（bilibili.com/space/<mid>）。"
+                    )
+
                 if len(users) > 1 and users[0].get("uname") != author:
                     rows = "\n".join(
                         f"- {u['uname']}（mid={u['mid']}，{_view(u['fans'])}粉丝，{u['videos']}个视频）"
@@ -103,10 +129,41 @@ def run(arguments):
                         f"「{author}」匹配到多个 UP 主，请用 mid 再调一次：\n\n{rows}"
                     )
                 mid = users[0]["mid"]
-            items = bili.user_videos(mid, limit=limit, order="pubdate")
+                uname = users[0].get("uname") or uname
+
+            items = []
+            if mid:
+                try:
+                    items = bili.user_videos(mid, limit=limit, order="pubdate")
+                except Exception as e:
+                    # ★ B站的 UP 主页接口现在带强反爬（412 / -352 风控），
+                    #   硬碰会一直修；这里直接降级，别把死路交给模型去撞。
+                    note += f"TA 的作品列表接口被 B站风控拦下（{str(e)[:40]}），"
+
+            if not items:
+                try:
+                    pool = bili.search(uname, limit=30, order="totalrank")
+                except Exception as e:
+                    return f"错误：搜索失败：{e}"
+                items = [x for x in pool if uname and uname in (x.get("author") or "")]
+                note += f"已改用关键词搜索并按作者名「{uname}」过滤，可能不全。"
+                if not items:
+                    # ★ 这里必须说清"重试没用"：
+                    #   否则模型会把 412 当成临时抖动，换个 limit 反复撞同一堵墙
+                    #   （实测连撞 5 次，全是同一个 412）。
+                    return (
+                        f"错误：拿不到「{uname}」的作品列表——B站对这个接口有频控"
+                        "（HTTP 412 / 风控 -352），连着用同样参数重试只会继续被拦。\n"
+                        "可选：① 在 config.py 填 VIDEO_BILI_COOKIE（登录后复制 SESSDATA），"
+                        "这条路径会稳很多；② 直接给我一个视频链接或 BV号，我取那一条；"
+                        "③ 改用 query 关键词按主题搜（不按作者）。"
+                    )
+
+            if items and uname.isdigit():
+                uname = items[0].get("author") or uname   # 用作品里的作者名当标题
             if min_minutes:
                 items = [x for x in items if (x.get("duration") or 0) >= min_minutes * 60]
-            title = f"UP主 mid={mid} 的视频"
+            title = f"「{uname}」的视频" + (f"（{note.rstrip('，')}）" if note else "")
         else:
             items = bili.search(query, limit=limit, order=order, min_minutes=min_minutes)
             title = f"关键词「{query}」"
