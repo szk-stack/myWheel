@@ -75,13 +75,31 @@ _wbi_cache = {"img": "", "sub": "", "at": 0.0}
 
 
 def _cookie():
-    """读配置里的 cookie；没有就返回空串（大部分接口免登录可用）。"""
+    """取 cookie：配置里手填的优先，其次用扫码登录存下来的。
+
+    ★ 登录态能解决三件免登录做不到的事：
+      1. AI 字幕（未登录时字幕列表永远是空的）；
+      2. 高画质 / 高码率流；
+      3. UP 主作品列表的限流会宽松很多（免登录每页要等 7 秒）。
+    """
     try:
         import config
 
-        return (getattr(config, "VIDEO_BILI_COOKIE", "") or "").strip()
+        ck = (getattr(config, "VIDEO_BILI_COOKIE", "") or "").strip()
+        if ck:
+            return ck
     except Exception:
-        return ""
+        pass
+
+    try:
+        from . import login
+
+        jar = login.load_cookie()
+        if jar:
+            return "; ".join(f"{k}={v}" for k, v in jar.items())
+    except Exception:
+        pass
+    return ""
 
 
 def session():
@@ -164,7 +182,11 @@ def ensure_buvid():
     """
     global _buvid_ok
     s = session()
-    if _buvid_ok or s.cookies.get("buvid3"):
+    # 已经从登录凭据里带了 buvid3，就不用再领
+    existing = (s.headers.get("Cookie") or "") + ";" + ";".join(
+        f"{c.name}={c.value}" for c in s.cookies
+    )
+    if _buvid_ok or "buvid3=" in existing:
         _buvid_ok = True
         return
 
