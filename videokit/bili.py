@@ -445,7 +445,7 @@ def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30, days=0):
          dm_cover_img_str / dm_img_list / platform / web_location 才行。
       2. 指纹参数必须**一起参与 WBI 签名**（只加不签仍然 -352）。
       3. 连打会被限流（实测连打 4 次只成 1 次），拉开 8 秒能到 2/3。
-         所以这里自带节流：两次请求至少隔 _SPACE_MIN_INTERVAL 秒。
+         所以这里自带节流：游客两次请求至少隔 7 秒，登录后 1 秒。
     代价是慢：一个 142 个视频的 UP 主要翻 5 页，约 40 秒。所以结果会缓存。
 
     cache_dir 给了就落盘缓存（同一天内不重复爬）。
@@ -536,9 +536,20 @@ def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30, days=0):
 
 
 # 空间接口的节流：两次请求之间至少隔这么久（秒）
-_SPACE_MIN_INTERVAL = 7.0
+# ★ 登录后实测连打 3 次全过、每次 0.1 秒，所以登录态下几乎不用等；
+#   游客身份才需要 7 秒——那个限制是给匿名请求准备的。
+_SPACE_MIN_INTERVAL_GUEST = 7.0
+_SPACE_MIN_INTERVAL_LOGIN = 1.0
 _space_last = 0.0
 _space_lock = threading.Lock()
+
+
+def _logged_in():
+    return "SESSDATA=" in (_cookie() or "")
+
+
+def _space_interval():
+    return _SPACE_MIN_INTERVAL_LOGIN if _logged_in() else _SPACE_MIN_INTERVAL_GUEST
 
 
 def _space_params(mid, page, ps, order):
@@ -568,7 +579,7 @@ def _space_page(mid, page, ps, order, retries=2):
     last = None
     for attempt in range(retries + 1):
         with _space_lock:
-            wait = _SPACE_MIN_INTERVAL - (time.time() - _space_last)
+            wait = _space_interval() - (time.time() - _space_last)
             if wait > 0:
                 time.sleep(wait)
             _space_last = time.time()
@@ -619,22 +630,39 @@ def _write_author_cache(cache_dir, mid, items, total):
 # ------------------------------------------------------------
 
 
+def _has_subtitle_url(subs):
+    """轨道里有真正能下载的地址吗。
+
+    ★ B站会返回"有轨道、但 subtitle_url 是空串"的条目（实测同一视频
+      连调两次，一次给地址一次不给）。只看"有没有轨道"会误判成可用，
+      后面去下载就会 404。
+    """
+    return any((s.get("subtitle_url") or "").strip() for s in subs)
+
+
 def subtitles(bvid, cid):
     """取这一 P 的字幕轨列表。
 
     ★ 未登录时通常返回空数组——不是接口坏了，是 AI 字幕只对登录用户开放。
       遇到空要先往这个方向怀疑，别急着以为视频没有字幕。
+
+    ★ 两个接口轮着试：没登录时只有 wbi 那路可能给地址，
+      登录后两路都给，但都**时有时无**。所以判据是"拿到地址"，
+      而不是"拿到轨道"。
     """
     data = _get("/x/player/v2", {"bvid": bvid, "cid": cid}) or {}
     subs = ((data.get("subtitle") or {}).get("subtitles")) or []
-    if subs:
+    if _has_subtitle_url(subs):
         return subs
-    # 再试一次带签名的 wbi 版本（有的视频只在它下面给）
+
     try:
-        data = _get("/x/player/wbi/v2", {"bvid": bvid, "cid": cid}, signed=True) or {}
-        return ((data.get("subtitle") or {}).get("subtitles")) or []
+        alt = _get("/x/player/wbi/v2", {"bvid": bvid, "cid": cid}, signed=True) or {}
+        subs2 = ((alt.get("subtitle") or {}).get("subtitles")) or []
+        if _has_subtitle_url(subs2):
+            return subs2
+        return subs2 or subs        # 都没有地址：返回轨道信息，让上层能提示原因
     except BiliError:
-        return []
+        return subs
 
 
 def subtitle_segments(url, timeout=20):
