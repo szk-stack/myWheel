@@ -22,6 +22,7 @@ toolbox.py —— 工具箱（本项目第五块积木）
 """
 
 import importlib
+import json
 import pkgutil
 import threading
 from pathlib import Path
@@ -161,6 +162,55 @@ def disabled_names():
 
 
 # ============================================================
+# 失败闸：同一调用连续失败几次就拦住
+# ------------------------------------------------------------
+# ★ 为什么需要它：
+#   工具失败时我们只把"错误：xxx"还给模型，然后继续循环。
+#   模型很容易把失败当成"临时抖动"，于是换个 limit 数字、原样再撞一次。
+#   实测就出现过同一个 412 连撞 5 次（B站风控），一分钱信息都没多。
+#
+# ★ 判据是"同一工具 + 完全相同的参数"：
+#   只要参数变了一个字符，就当成新尝试放行——改参数正是我们希望它做的事。
+#   成功一次就清零，所以"失败→改参数→成功→再失败"不会误伤。
+#
+# ★ 为什么是 2 次而不是 1 次：
+#   网络真的抖一下时，第二次重试是有意义的；第三次基本可以断定是思路错了。
+# ============================================================
+
+FAIL_STREAK_LIMIT = 2
+
+
+def _streak():
+    """取本线程的失败计数（形如 {"key": "...", "count": 2}）。"""
+    state = getattr(_local, "fail_streak", None)
+    if state is None:
+        state = {"key": None, "count": 0}
+        _local.fail_streak = state
+    return state
+
+
+def reset_fail_streak():
+    """清空失败计数（engine 在每次对话开头调用一次）。
+
+    ★ 必须按"一次对话"重置：别人接着聊新话题时，
+      上次那个失败调用不该继续背锅。
+    """
+    _local.fail_streak = {"key": None, "count": 0}
+
+
+def _call_key(name, arguments):
+    """把"工具名 + 参数"压成一个可比较的字符串。
+
+    sort_keys 保证 {"a":1,"b":2} 和 {"b":2,"a":1} 算同一个调用。
+    """
+    try:
+        payload = json.dumps(arguments or {}, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        payload = repr(arguments)
+    return name + "|" + payload
+
+
+# ============================================================
 # 工具"附件"（随结果捎带给上层的数据）
 # ------------------------------------------------------------
 # 工具平时只返回一个字符串（给模型看的结果）；但有时还想捎带一些
@@ -249,6 +299,17 @@ def call(name, arguments):
     if name in disabled_names():
         return f"错误：工具「{name}」当前不可用"
 
+    # ★ 失败闸：同样的调用已经连着失败两次，就不再真的执行了。
+    #   拦在这里而不是执行之后，是为了别让"撞墙"这个动作本身付出代价
+    #   （B站那次，每次撞墙要等 2 秒退避，五次就是十秒）。
+    key = _call_key(name, arguments)
+    state = _streak()
+    if state["key"] == key and state["count"] >= FAIL_STREAK_LIMIT:
+        return (
+            f"错误：同一调用已连续失败 {state['count']} 次，换参数或换思路，不要原样重试。"
+            "（如果改的是参数，哪怕只改一个字，也会放行。）"
+        )
+
     # 路过预留的"工具执行前"空槽（将来的权限确认、审计插件挂在这里）
     ctx = {"name": name, "arguments": arguments, "blocked": None}
     hooks.run(hooks.before_tool, ctx)
@@ -256,9 +317,20 @@ def call(name, arguments):
         return f"工具调用被拦截：{ctx['blocked']}"
 
     try:
-        return _registry[name]["run"](arguments)
+        result = _registry[name]["run"](arguments)
     except Exception as e:
-        return f"错误：工具执行失败：{e}"
+        result = f"错误：工具执行失败：{e}"
+
+    # 记账：成功了就清零，失败了就累计（只认"同一调用"）
+    if result.startswith("错误"):
+        if state["key"] == key:
+            state["count"] += 1
+        else:
+            state["key"], state["count"] = key, 1
+    else:
+        state["key"], state["count"] = None, 0
+
+    return result
 
 
 def load_tools():

@@ -225,6 +225,9 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
         #   （用"线程本地"记录：多线程服务器里，不同对话的请求互不串台）
         toolbox.set_workspace(workspace)
 
+        # ★ 失败闸清零：每次对话重新开始记账（上一个话题的失败不该连坐）
+        toolbox.reset_fail_streak()
+
         # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
         #   "应用"已有的压缩（切成"摘要 + 最近消息"）
         ctx["meta"]["compaction"] = compaction
