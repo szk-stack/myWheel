@@ -6,8 +6,10 @@
 为什么改过来了（2026-11-01，之前的设计是"字幕优先"）：
   1. 字幕地址**时有时无**：同一个视频连调三次，两次返回空 subtitle_url，
      只有一次能下。要重试到拿稳，比直接转写还慢。
-  2. 字幕可能**残缺**：拿到过一份只覆盖 3 分 18 秒的 AI 字幕（全长 17 分钟），
-     而且看不出哪里缺了——这种"看起来成功了、其实丢了大半"最坑。
+  2. 字幕是**随机分片**：同一视频连调 6 次，B站给了 6 个不同的字幕文件，
+     覆盖到 221s / 519s / 522s / 1021s（全长 1021s）不等。
+     取一次就用，大概率只拿到前几分钟，而且**看不出来**——
+     这种"看起来成功了、其实丢了大半"比没有更危险。
   3. 字幕是**第三方加工过的产物**（断句、改写、漏句），
      我们要的是"这个视频说了什么"，音频才是原始素材。
   4. 本地转写已经够快（RTF 0.11，17 分钟视频 114 秒），省这点算力不值当。
@@ -75,29 +77,49 @@ def _pick_subtitle(subs):
 
 
 def _by_subtitle(vid, info, folder, transcript, meta, root):
-    """可选路线：直接取字幕。会在结果里如实报告覆盖度。"""
-    try:
-        subs = bili.subtitles(vid, info["cid"])
-    except Exception as e:
-        return f"错误：查字幕失败：{e}"
+    """可选路线：直接取字幕。
 
-    usable = [s for s in subs if (s.get("subtitle_url") or "").strip()]
-    if not usable:
+    ★ 实测（2026-11-01，同一视频连调 6 次）：
+      B站每次都返回**不同的字幕文件**，覆盖到 221s / 519s / 522s / 1021s 不等，
+      全长 1021s。也就是说这是个**随机分片**，不是"字幕本来就残缺"。
+      取一次就用，有 2/3 的概率只拿到前几分钟，而且看不出来。
+
+      所以这里多试几次（每次约 0.5 秒），留覆盖最全的那份。
+    """
+    direction = info["duration"] or 1
+    best = None
+
+    for attempt in range(4):
+        try:
+            subs = bili.subtitles(vid, info["cid"])
+        except Exception:
+            subs = []
+        usable = [s for s in subs if (s.get("subtitle_url") or "").strip()]
+        if not usable:
+            continue
+
+        pick = _pick_subtitle(usable)
+        try:
+            raw = bili.subtitle_segments(pick["subtitle_url"])
+        except Exception:
+            continue
+        if not raw:
+            continue
+
+        covered = max(r["t1"] for r in raw)
+        if best is None or covered > best[0]:
+            best = (covered, raw, pick)
+        if covered / direction >= 0.95:      # 基本齐了就别再试
+            break
+
+    if best is None:
         return (
-            "错误：没拿到可用的字幕地址。\n"
-            "B站这个接口会给「有轨道但地址为空」的结果，重试几次可能就有，"
-            "但更可靠的做法是走默认路线（下音轨 + ASR）：把 source 去掉重调一次。"
+            "错误：没拿到可用的字幕。\n"
+            "B站这个接口会返回「有轨道但地址为空」或空文件，"
+            "更可靠的做法是走默认路线（下音轨 + ASR）：把 source 去掉重调一次。"
         )
 
-    pick = _pick_subtitle(usable)
-    try:
-        raw = bili.subtitle_segments(pick["subtitle_url"])
-    except Exception as e:
-        return f"错误：下载字幕失败：{e}"
-
-    if not raw:
-        return "错误：字幕文件是空的"
-
+    covered, raw, pick = best
     segs = [
         timeline.Segment(t0=r["t0"], t1=r["t1"], kind="caption", text=r["text"], source="caption")
         for r in raw
@@ -105,15 +127,12 @@ def _by_subtitle(vid, info, folder, transcript, meta, root):
     paras = timeline.merge_into_paragraphs(segs)
     timeline.write_jsonl(folder / "segments.jsonl", segs)
 
-    # ★ 覆盖度检查：字幕可能只覆盖前几分钟，这种残缺比没有更危险
-    covered = max((s.t1 for s in segs), default=0)
-    duration = info["duration"] or 1
-    ratio = covered / duration
+    ratio = covered / direction
     note = ""
     if ratio < 0.85:
         note = (
-            f"\n\n⚠️ 注意：字幕只覆盖到 {timeline.fmt_ts(covered)}，"
-            f"占全长 {ratio:.0%}，后面是缺的。要完整的就改走 ASR（去掉 source 重调）。"
+            f"\n\n⚠️ 字幕只覆盖到 {timeline.fmt_ts(covered)}（{ratio:.0%}），"
+            "试了 4 次没拿到更全的。要完整的就改走 ASR（去掉 source 重调）。"
         )
 
     label = f"B站字幕 · {pick.get('lan_doc') or pick.get('lan')}（未跑 ASR）"
@@ -125,8 +144,8 @@ def _by_subtitle(vid, info, folder, transcript, meta, root):
 
     return (
         f"「{info['title']}」\n"
-        f"时长 {timeline.fmt_ts(duration)} ｜ UP主 {info['owner']} ｜ 字幕：{pick.get('lan_doc')}\n"
-        f"已按时间轴合并成 {timeline.stats(paras)}\n"
+        f"时长 {timeline.fmt_ts(direction)} ｜ UP主 {info['owner']} ｜ 字幕：{pick.get('lan_doc')}\n"
+        f"已按时间轴合并成 {timeline.stats(paras)}（覆盖 {ratio:.0%}）\n"
         f"→ videos/{vid}/transcript.md{note}"
     )
 
