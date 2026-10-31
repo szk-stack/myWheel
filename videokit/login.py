@@ -130,7 +130,8 @@ def start(root=None):
         alive = (
             _STATE["key"]
             and _STATE["status"] in ("waiting", "scanned")
-            and time.time() - _STATE["created"] < QR_TTL
+            # 留 40 秒余量：快过期的码别再拿出来给用户扫
+            and time.time() - _STATE["created"] < QR_TTL - 40
         )
         if alive:
             return dict(_STATE, session=None)
