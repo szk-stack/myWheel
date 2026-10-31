@@ -96,12 +96,20 @@ def parse_srt(text):
 
 
 def upload(path, timeout=300):
-    """上传音频/视频，返回服务端转换后的 wav 文件名。"""
+    """上传音频/视频，返回服务端转换后的 wav 文件名。
+
+    ★ 上传时**必须换个唯一的名字**，这是踩过的坑：
+      我们的音轨统一叫 audio.m4a，服务端按原文件名转成 audio.wav 并缓存在
+      static/tmp 下。第二个视频传上去仍叫 audio.wav，就会命中上一份的缓存，
+      转出来是**别的视频的内容**——而时长、段数看着都正常，极难发现。
+      实测：10 分钟的 RAG 视频，转出来是上一个 1 分钟乡村视频的稿子。
+    """
     p = Path(path)
+    unique = f"{p.stem}-{int(time.time() * 1000)}{p.suffix}"
     with open(p, "rb") as f:
         r = _session().post(
             base_url() + "/upload",
-            files={"audio": (p.name, f)},   # 字段名必须是 audio，前端也这么传
+            files={"audio": (unique, f)},   # 字段名必须是 audio，前端也这么传
             timeout=timeout,
         )
     d = r.json()

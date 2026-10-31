@@ -160,6 +160,20 @@ def run(arguments):
     duration = info.get("duration") or meta.get("duration") or 0
     rtf = (info["elapsed"] / duration) if duration else 0
 
+    # ★ 覆盖度自检：转写结果的长度必须和视频时长对得上。
+    #   这一条能抓住"转错文件"这种最阴的 bug——段数、耗时、RTF 全都正常，
+    #   只有内容不对。实测踩过一次：10 分钟的视频转出来是上个 1 分钟视频的稿子，
+    #   原因是上传文件名相同、服务端命中了旧缓存。
+    expect = meta.get("duration") or 0
+    covered = segs[-1].t1 if segs else 0
+    warn = ""
+    if expect and covered < expect * 0.9:
+        warn = (
+            f"\n\n⚠️ 只覆盖到 {timeline.fmt_ts(covered)}，视频总长 "
+            f"{timeline.fmt_ts(expect)}（{covered / expect:.0%}）——内容可能不对。\n"
+            f"先确认视频有没有声音；若音轨正常，删掉 videos/{vid}/audio.m4a 后重抓重转。"
+        )
+
     return (
         f"「{meta.get('title', vid)}」转写完成\n"
         f"音频 {timeline.fmt_ts(duration)} ｜ 用时 {info['elapsed']} 秒 ｜ "
@@ -167,6 +181,7 @@ def run(arguments):
         f"合并成 {timeline.stats(paras)}\n"
         f"→ videos/{vid}/transcript.md\n\n"
         "注意：这是语音识别结果，专名仍可能有错字；引用原话前先扫一眼。"
+        f"{warn}"
     )
 
 
