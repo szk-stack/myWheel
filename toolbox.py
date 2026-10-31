@@ -68,6 +68,21 @@ def current_workspace():
     return getattr(_local, "root", None)
 
 
+def set_full_access(enabled):
+    """记录"本线程当前对话是否放开工作区限制"（engine 每次对话开始时调用）。
+
+    ★ 这是**用户**在前端拨的开关，模型自己没有权力改它：
+      模型能看到的只有工具说明书和工具结果，拿不到这个函数。
+      所以"agent 能不能跑出工作区"这件事，始终握在用户手里。
+    """
+    _local.full_access = bool(enabled)
+
+
+def full_access():
+    """本线程当前是否放开了工作区限制（默认 False）。"""
+    return bool(getattr(_local, "full_access", False))
+
+
 def dangerous_reason(path):
     """检查一个目录是不是"太宽或太敏感"、不适合当工作区。
 

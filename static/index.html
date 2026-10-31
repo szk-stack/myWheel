@@ -307,6 +307,36 @@
     color: var(--accent-strong);
     background: var(--bg-accent-soft);
   }
+
+  /* 完整权限开关：平时是个安静的胶囊，打开后变红——提醒"这会儿没有围栏" */
+  #fullAccessTag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--r-full);
+    padding: var(--sp-1) var(--sp-3);
+    cursor: pointer;
+    user-select: none;
+    transition: all .15s;
+  }
+  #fullAccessTag:hover { border-color: var(--accent); }
+  #fullAccessTag input {
+    margin: 0;
+    width: 12px;
+    height: 12px;
+    cursor: pointer;
+    accent-color: #e5484d;
+  }
+  #fullAccessTag.on {
+    color: #b42318;
+    background: #fef3f2;
+    border-color: #fda29b;
+    font-weight: 600;
+  }
   #workspaceMenu {
     position: absolute;
     bottom: 130%;                  /* 向上弹出（盖向消息区，不挡输入） */
@@ -875,6 +905,12 @@
           <button data-action="reset">项目目录（agent 直接改项目文件）</button>
         </div>
 
+        <!-- 完整权限开关：关着的时候 agent 只能在「工作区」里读写 -->
+        <label id="fullAccessTag" title="关：agent 只能在上面那个工作区里读写。开：允许操作工作区以外的文件（仍会拒绝盘符根目录和系统目录）。只对当前会话生效，刷新页面自动关回去。">
+          <input type="checkbox" id="fullAccessChk">
+          <span id="fullAccessText">完整权限</span>
+        </label>
+
         <!-- 上下文用量计量（点击弹出详情 + 手动压缩）-->
         <div id="contextMeter" title="上下文用量（点击看详情）">
           <span id="contextText">上下文 ≈0%</span>
@@ -958,6 +994,9 @@ let pendingImages = [];  // 待发送的图片（{dataUrl, name}）——发送�
 const convListEl = document.getElementById("convList");
 const titleTextEl = document.getElementById("titleText");        // 标题栏里的会话名
 const workspaceTagEl = document.getElementById("workspaceTag");  // 输入框上方的工作区标签
+const fullAccessChkEl = document.getElementById("fullAccessChk");// 完整权限勾选框
+const fullAccessTagEl = document.getElementById("fullAccessTag");// 完整权限胶囊
+const fullAccessTextEl = document.getElementById("fullAccessText");
 const workspaceMenuEl = document.getElementById("workspaceMenu");// 工作区小菜单
 const contextMeterEl = document.getElementById("contextMeter");   // 上下文计量组件
 const contextTextEl = document.getElementById("contextText");     // 计量文字
@@ -1562,6 +1601,7 @@ async function sendMessage() {
       body: JSON.stringify({
         messages: fullHistory,
         workspace: conv.workspace || null,
+        full_access: !!conv.fullAccess,        // 输入框旁那个「完整权限」开关
         compaction: conv.compaction || null,   // 当前压缩状态（后端据此"应用"压缩）
         conversation_id: conv.id,              // 链路日志用（标记这次任务是哪个会话的）
       }),
@@ -1877,6 +1917,8 @@ function renderMessages() {
   workspaceTagEl.title = ws
     ? "当前工作区：" + ws + "（点击修改）"
     : "默认工作区：项目目录（点击修改）";
+
+  syncFullAccess();
 
   chatBox.innerHTML = "";       // 同样先清空
 
@@ -2318,6 +2360,42 @@ document.addEventListener("keydown", function (e) {
 
 // 工作区标签：点开小菜单；菜单里的按钮分流到三种方式
 workspaceTagEl.addEventListener("click", toggleWorkspaceMenu);
+
+// ---------- 完整权限开关 ----------
+// 关（默认）：agent 只能在「工作区」里读写。
+// 开：允许读写工作区以外的路径——用来处理"素材在别的盘、项目在这里"这类情况。
+// 状态挂在会话对象上，刷新页面就回到关闭（安全默认）。
+function syncFullAccess() {
+  const conv = currentConv();
+  const on = !!(conv && conv.fullAccess);
+  fullAccessChkEl.checked = on;
+  fullAccessTagEl.classList.toggle("on", on);
+  fullAccessTextEl.textContent = on ? "完整权限：开" : "完整权限";
+}
+
+fullAccessChkEl.addEventListener("change", () => {
+  const conv = currentConv();
+  if (!conv) {
+    fullAccessChkEl.checked = false;
+    return;
+  }
+
+  if (fullAccessChkEl.checked) {
+    const ok = confirm(
+      "打开「完整权限」后，agent 可以读写工作区以外的文件。\n\n" +
+      "· 仍会拒绝盘符根目录、系统目录这类位置\n" +
+      "· 只对当前会话生效，刷新页面会自动关回去\n\n" +
+      "确定打开吗？"
+    );
+    if (!ok) {
+      fullAccessChkEl.checked = false;
+      return;
+    }
+  }
+
+  conv.fullAccess = fullAccessChkEl.checked;
+  syncFullAccess();
+});
 document.querySelectorAll("#workspaceMenu button").forEach(function (menuBtn) {
   menuBtn.addEventListener("click", function () {
     workspaceMenuEl.classList.add("hidden");   // 点了就收起菜单

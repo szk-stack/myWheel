@@ -174,12 +174,16 @@ def _slim_message(m):
 
 
 def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
-                conversation_id=None, trace_source="main"):
+                conversation_id=None, trace_source="main", full_access=False):
     """流式版对话流程（生成器）。
 
     参数 workspace：本次对话的工作区目录（None = 默认项目目录）——
     由用户在前端设定、随请求传进来；注意：模型没有权力改它，
     它只是被锁在工作区里干活的人。
+
+    参数 full_access：用户在输入框旁拨的「完整权限」开关——
+    True 时文件工具可以读写工作区以外的路径（仍会拒绝盘符根目录和系统目录）。
+    同样是**用户**的权力，模型改不了。
 
     参数 compaction：会话的上下文压缩状态（{"summary", "first_kept_index"} 或 None）
     —— 由前端随请求带来，放进 ctx["meta"] 供 compact 插件使用。
@@ -227,6 +231,9 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
 
         # ★ 失败闸清零：每次对话重新开始记账（上一个话题的失败不该连坐）
         toolbox.reset_fail_streak()
+
+        # ★ 完整权限开关（用户在前端拨的，默认关）
+        toolbox.set_full_access(full_access)
 
         # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
         #   "应用"已有的压缩（切成"摘要 + 最近消息"）

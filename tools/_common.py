@@ -43,6 +43,15 @@ def safe_path(user_path):
     real = candidate.resolve()
 
     # 4. ★ 安全检查：必须落在工作区里面，否则拒了
+    if toolbox.full_access():
+        # 用户在前端拨开了「完整权限」：不再限制在工作区内。
+        # 但仍然拒绝盘符根目录 / 系统目录这类"一写就出大事"的位置——
+        # 放开的是"范围"，不是"保险"。这两个不是一回事。
+        reason = toolbox.dangerous_reason(real)
+        if reason:
+            raise ValueError(f"目标路径不合规（{reason}）：{user_path}")
+        return real
+
     if not real.is_relative_to(root):
         raise ValueError(f"路径越界：「{user_path}」超出了工作区范围")
 

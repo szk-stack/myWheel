@@ -251,6 +251,7 @@ class ChatHandler(BaseHTTPRequestHandler):
                 workspace=data.get("workspace"),
                 compaction=data.get("compaction"),   # 压缩状态（compact 插件要用）
                 conversation_id=data.get("conversation_id"),   # 链路日志用（哪个会话）
+                full_access=bool(data.get("full_access")),     # 用户拨的「完整权限」开关
             )
             for event in stream:
                 self._send_sse(event)
