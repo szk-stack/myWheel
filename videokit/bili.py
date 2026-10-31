@@ -347,17 +347,19 @@ def _search_page(keyword, page, order):
     return _search_api("video", keyword, page, order)
 
 
-def search(keyword, limit=15, order="totalrank", min_minutes=0):
+def search(keyword, limit=15, order="totalrank", min_minutes=0, days=0):
     """关键词搜视频，返回候选列表（不下载）。
 
     order: totalrank（综合）/ click（播放）/ pubdate（最新）
     min_minutes: 只要这个时长以上的——"系统学点什么"通常 10 分钟起步
+    days: 只要最近 N 天发布的（0 = 不限）——"这两天的视频"就靠它
     """
     keyword = (keyword or "").strip()
     if not keyword:
         raise ValueError("关键词不能为空")
 
     min_seconds = int(min_minutes or 0) * 60
+    cutoff = (time.time() - int(days) * 86400) if days else 0
     out, page = [], 1
     retried_risk = False
 
@@ -383,6 +385,8 @@ def search(keyword, limit=15, order="totalrank", min_minutes=0):
                 continue          # 搜索里会混进没有 BV 号的广告位，取不了
             seconds = parse_duration(it.get("duration"))
             if min_seconds and seconds < min_seconds:
+                continue
+            if cutoff and (it.get("pubdate") or 0) < cutoff:
                 continue
             out.append(
                 {
@@ -421,7 +425,7 @@ def search_user(keyword, limit=5):
     ]
 
 
-def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30):
+def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30, days=0):
     """某个 UP 主的视频列表（★ 批量看一个作者就靠它）。
 
     ★ 这个接口比搜索难对付得多，三条经验都是实测出来的：
@@ -444,7 +448,18 @@ def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30):
 
     # 缓存够用就直接返回（够用 = 条数满足 limit，或者已经取全了）
     if items and (len(items) >= limit or (total and len(items) >= total)):
-        return {"items": items[:limit], "total": total, "mid": mid, "cached": True}
+        fresh = items
+        if days:
+            cutoff = time.time() - int(days) * 86400
+            fresh = [x for x in items if (x.get("pubdate") or 0) >= cutoff]
+        return {
+            "items": fresh[:limit],
+            "total": total,
+            "mid": mid,
+            "cached": True,
+            "partial": False,
+            "recent": len(fresh),
+        }
 
     # 不够就**续取**：从上次停下的那一页接着翻，按 bvid 去重。
     # ★ 为什么不整段重爬：一个 142 个视频的号要翻 5 页、每页 7 秒，
@@ -490,12 +505,21 @@ def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30):
         page += 1
 
     _write_author_cache(cache_dir, mid, items, total)
+
+    # 「这两天的视频」：按发布时间过滤（缓存里存全量，过滤在返回时做，
+    # 这样一个缓存能给不同 days 用）
+    fresh = items
+    if days:
+        cutoff = time.time() - int(days) * 86400
+        fresh = [x for x in items if (x.get("pubdate") or 0) >= cutoff]
+
     return {
-        "items": items[:limit],
+        "items": fresh[:limit],
         "total": total,
         "mid": mid,
         "cached": bool(cached),
         "partial": partial,
+        "recent": len(fresh),
     }
 
 

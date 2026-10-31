@@ -52,6 +52,10 @@ DESCRIPTION = {
                 "type": "integer",
                 "description": "只看时长 ≤ 这个分钟数的（批量时用来避开几小时的超长视频）",
             },
+            "days": {
+                "type": "integer",
+                "description": "只看最近 N 天发布的（0 = 不限）。「这两天的视频」填 2",
+            },
             "action": {
                 "type": "string",
                 "enum": ["fetch", "transcribe"],
@@ -79,6 +83,7 @@ def run(arguments):
     limit = min(int(arguments.get("limit") or 10), 50)
     min_minutes = int(arguments.get("min_minutes") or 0)
     max_minutes = int(arguments.get("max_minutes") or 0)
+    days = int(arguments.get("days") or 0)
     action = arguments.get("action") or "transcribe"
     budget = min(int(arguments.get("budget_seconds") or 300), 900)
 
@@ -99,7 +104,7 @@ def run(arguments):
 
     try:
         listing = bili.user_videos(
-            mid, limit=200, order="pubdate",
+            mid, limit=200, order="pubdate", days=days,
             cache_dir=store.videos_root(root) / "_authors",
         )
     except Exception as e:

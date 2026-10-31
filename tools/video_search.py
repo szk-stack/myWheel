@@ -44,6 +44,10 @@ DESCRIPTION = {
                 "type": "integer",
                 "description": "只要时长 ≥ 这个分钟数的（想系统学点什么就填 10）",
             },
+            "days": {
+                "type": "integer",
+                "description": "只要最近 N 天发布的（0 = 不限）。「这两天的视频」就填 2",
+            },
             "order": {
                 "type": "string",
                 "enum": ["totalrank", "click", "pubdate"],
@@ -86,6 +90,18 @@ def _fmt_dur(sec):
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+def _name_match(query, name):
+    """名字算不算对上了。
+
+    ★ 为什么需要：B站的用户搜索**从不返回空**——搜"海运日记"它会给你
+      "海燕的运动日记"，搜一串乱码也可能匹配到某个号。
+      只判断 len(users)==1 就采用，等于把"唯一的模糊结果"当成"精确答案"，
+      这是之前那个"找不到那个 UP 主却差点抓错人"的根因。
+    """
+    q, n = (query or "").strip(), (name or "").strip()
+    return bool(q and n) and (q == n or q in n or n in q)
+
+
 def run(arguments):
     query = (arguments.get("query") or "").strip()
     author = (arguments.get("author") or "").strip()
@@ -96,6 +112,7 @@ def run(arguments):
     raw_limit = int(arguments.get("limit") or 15)
     limit = min(raw_limit, 200 if author else 30)
     min_minutes = int(arguments.get("min_minutes") or 0)
+    days = int(arguments.get("days") or 0)
     order = arguments.get("order") or "totalrank"
     root = toolbox.current_workspace() or str(toolbox.PROJECT_ROOT)
 
@@ -128,23 +145,28 @@ def run(arguments):
                         "如果确实要 TA 的全部作品，给我空间地址里的 mid（bilibili.com/space/<mid>）。"
                     )
 
-                if len(users) > 1 and users[0].get("uname") != author:
+                top = users[0]
+                if not _name_match(author, top.get("uname")):
                     rows = "\n".join(
                         f"- {u['uname']}（mid={u['mid']}，{_view(u['fans'])}粉丝，{u['videos']}个视频）"
                         for u in users
                     )
                     return (
-                        f"「{author}」匹配到多个 UP 主，请用 mid 再调一次：\n\n{rows}"
+                        f"没找到叫「{author}」的 UP 主，B站只给了这些相近的：\n\n{rows}\n\n"
+                        "→ 先别当成就是它。三条路：\n"
+                        "① 确实是其中之一 → 用它的 mid 再调一次；\n"
+                        "② 给我 UP 主页链接（bilibili.com/space/<mid>）或任一视频链接，我从视频反查 mid；\n"
+                        "③ 不确定号名 → 改用 query 按主题搜。"
                     )
-                mid = users[0]["mid"]
-                uname = users[0].get("uname") or uname
+                mid = top["mid"]
+                uname = top.get("uname") or uname
 
             items, total = [], 0
             if mid:
                 cache_dir = store.videos_root(root) / "_authors"
                 try:
                     res = bili.user_videos(
-                        mid, limit=limit, order="pubdate", cache_dir=cache_dir
+                        mid, limit=limit, order="pubdate", cache_dir=cache_dir, days=days
                     )
                     items, total = res["items"], res["total"]
                     if res.get("cached"):
@@ -179,7 +201,7 @@ def run(arguments):
                 items = [x for x in items if (x.get("duration") or 0) >= min_minutes * 60]
             title = f"「{uname}」的视频" + (f"（{note.rstrip('，')}）" if note else "")
         else:
-            items = bili.search(query, limit=limit, order=order, min_minutes=min_minutes)
+            items = bili.search(query, limit=limit, order=order, min_minutes=min_minutes, days=days)
             title = f"关键词「{query}」"
     except Exception as e:
         return f"错误：搜索失败：{e}"
