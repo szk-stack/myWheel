@@ -91,6 +91,10 @@ class ChatHandler(BaseHTTPRequestHandler):
             # 静态资源（比如前端用来渲染 Markdown 的 marked.min.js）
             self._serve_static_file(self.path[len("/static/"):])
 
+        elif self.path.startswith("/bili/login"):
+            # B站扫码登录页（agent 把链接发给用户，用户在这里扫码）
+            self._serve_bili_login()
+
         else:
             self.send_error(404, "Not Found")
 
@@ -364,6 +368,57 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def _serve_bili_login(self):
+        """B站扫码登录的三条路由。
+
+        ★ 为什么要通过网页中转，而不是让工具直接返回一张二维码图片：
+          工具调用必须立刻返回（不能卡着等用户扫码 3 分钟），
+          而"扫码 → 手机确认 → 拿到 SESSDATA"是一个跨几十秒的异步过程。
+          所以工具只发一个链接，页面自己轮询 /bili/login/status 推进状态；
+          登录成功后由服务端把 cookie 写进 bili_cookie.json，
+          工具下次读到就直接是登录态了。
+        """
+        import videokit.login as bili_login
+
+        path = self.path.split("?")[0]
+
+        if path == "/bili/login/status":
+            info = bili_login.status(str(ROOT))
+            self._send_json(200, info)
+            return
+
+        if path == "/bili/login/qr.svg":
+            svg = bili_login.qr_svg()
+            if not svg:
+                self.send_error(404, "二维码还没生成")
+                return
+            payload = svg.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        if path in ("/bili/login", "/bili/login/", "/bili/login/"):
+            # 每次打开页面都重新拿一个二维码（旧的可能已经过期了）
+            try:
+                bili_login.start(str(ROOT))
+            except Exception as e:
+                self.send_error(500, f"生成二维码失败：{e}")
+                return
+            html = (ROOT / "static" / "bili_login.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            return
+
+        self.send_error(404, "Not Found")
 
     def _serve_static_file(self, relative_path):
         """把 static/ 目录里的文件发出去（路径限制在 static 目录内，防越界）。"""

@@ -102,6 +102,18 @@ def _cookie():
     return ""
 
 
+def reset_session():
+    """丢掉缓存的会话，下次重建（登录成功后必须调一次）。
+
+    ★ 因为 session 是全局缓存的、cookie 只在创建时读一次：
+      扫码登录完成后如果不重置，接下来所有请求仍然用游客身份，
+      用户会以为"登了但没生效"。这是个很难察觉的坑。
+    """
+    global _session, _buvid_ok
+    _session = None
+    _buvid_ok = False
+
+
 def session():
     """全局复用一个 Session：省掉每次 TCP 握手，也让 cookie 自动带着走。"""
     global _session
