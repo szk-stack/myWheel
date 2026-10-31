@@ -21,10 +21,14 @@ videokit/bili.py —— B 站接口的最小实现
   3. 音频流不需要登录，但要带 Referer，否则 CDN 返回 403。
 """
 
+import base64
 import hashlib
+import json
 import re
+import threading
 import time
 import urllib.parse
+from pathlib import Path
 
 import requests
 
@@ -45,6 +49,12 @@ MIXIN_TAB = [
 
 _BV_RE = re.compile(r"(BV[0-9A-Za-z]{10})")
 _AV_RE = re.compile(r"av(\d+)", re.I)
+
+# 空间接口要的"软指纹"：B站只检查有没有，不验真伪（固定值即可）
+_B64_WEBGL = base64.b64encode(b"WebGL 1.0 (OpenGL ES 2.0 Chromium)").decode()
+_B64_GPU = base64.b64encode(
+    b"ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Laptop GPU Direct3D11 vs_5_0 ps_5_0), or similar"
+).decode()
 
 
 class BiliError(RuntimeError):
@@ -389,25 +399,62 @@ def search_user(keyword, limit=5):
     ]
 
 
-def user_videos(mid, limit=15, order="pubdate"):
-    """某个 UP 主的视频列表。mid 是空间地址里的那串数字。"""
-    out, page = [], 1
-    while len(out) < limit and page <= 5:
-        data = (
-            _get_guarded(
-                "/x/space/wbi/arc/search",
-                {"mid": mid, "ps": 30, "pn": page, "order": order},
-                signed=True,
-            )
-            or {}
-        )
+def user_videos(mid, limit=15, order="pubdate", cache_dir=None, ps=30):
+    """某个 UP 主的视频列表（★ 批量看一个作者就靠它）。
+
+    ★ 这个接口比搜索难对付得多，三条经验都是实测出来的：
+      1. 不带**设备指纹参数**必挂 -352「风控校验失败」——补 dm_img_str /
+         dm_cover_img_str / dm_img_list / platform / web_location 才行。
+      2. 指纹参数必须**一起参与 WBI 签名**（只加不签仍然 -352）。
+      3. 连打会被限流（实测连打 4 次只成 1 次），拉开 8 秒能到 2/3。
+         所以这里自带节流：两次请求至少隔 _SPACE_MIN_INTERVAL 秒。
+    代价是慢：一个 142 个视频的 UP 主要翻 5 页，约 40 秒。所以结果会缓存。
+
+    cache_dir 给了就落盘缓存（同一天内不重复爬）。
+    """
+    mid = str(mid).strip()
+    if not mid.isdigit():
+        raise ValueError(f"mid 应该是一串数字：{mid!r}")
+
+    cached = _read_author_cache(cache_dir, mid)
+    items = list(cached["items"]) if cached else []
+    total = cached.get("total", 0) if cached else 0
+
+    # 缓存够用就直接返回（够用 = 条数满足 limit，或者已经取全了）
+    if items and (len(items) >= limit or (total and len(items) >= total)):
+        return {"items": items[:limit], "total": total, "mid": mid, "cached": True}
+
+    # 不够就**续取**：从上次停下的那一页接着翻，按 bvid 去重。
+    # ★ 为什么不整段重爬：一个 142 个视频的号要翻 5 页、每页 7 秒，
+    #   为了多要 10 条重爬 35 秒很蠢。
+    seen = {x["bvid"] for x in items}
+    page = (len(items) // ps + 1) if items else 1
+    partial = False
+
+    while len(items) < limit and page <= 20:
+        try:
+            data = _space_page(mid, page, ps, order)
+        except Exception as e:
+            # ★ 关键：已经拿到一部分时，别因为后面某页被拦就整体失败。
+            #   这个接口本来就时好时坏，把 30 条丢掉、只回一个错误，
+            #   等于让用户白等 20 秒。给多少算多少，并标出来。
+            if _is_risk(e) and items:
+                partial = True
+                break
+            raise
+
         vlist = ((data.get("list") or {}).get("vlist")) or []
+        total = (data.get("page") or {}).get("count") or total
         if not vlist:
             break
         for it in vlist:
-            out.append(
+            bv = it.get("bvid", "")
+            if not bv or bv in seen:
+                continue
+            seen.add(bv)
+            items.append(
                 {
-                    "bvid": it.get("bvid", ""),
+                    "bvid": bv,
                     "title": it.get("title", ""),
                     "author": it.get("author", ""),
                     "duration": parse_duration(it.get("length")),
@@ -416,10 +463,97 @@ def user_videos(mid, limit=15, order="pubdate"):
                     "desc": (it.get("description") or "")[:90],
                 }
             )
-            if len(out) >= limit:
+            if len(items) >= limit:
                 break
         page += 1
-    return out[:limit]
+
+    _write_author_cache(cache_dir, mid, items, total)
+    return {
+        "items": items[:limit],
+        "total": total,
+        "mid": mid,
+        "cached": bool(cached),
+        "partial": partial,
+    }
+
+
+# 空间接口的节流：两次请求之间至少隔这么久（秒）
+_SPACE_MIN_INTERVAL = 7.0
+_space_last = 0.0
+_space_lock = threading.Lock()
+
+
+def _space_params(mid, page, ps, order):
+    """空间接口的设备指纹参数。
+
+    ★ 这几个是 2024 年后加的"软指纹"：B站不校验真伪，只要求**有**
+      （伪造固定的值就能过）。少一个就是 -352。
+    """
+    return {
+        "mid": mid,
+        "ps": ps,
+        "pn": page,
+        "order": order,
+        "platform": "web",
+        "web_location": 1550101,
+        "dm_img_list": "[]",
+        "dm_img_str": _B64_WEBGL,
+        "dm_cover_img_str": _B64_GPU,
+    }
+
+
+def _space_page(mid, page, ps, order, retries=2):
+    """取一页，失败按节流间隔重试。"""
+    global _space_last
+    params = _space_params(mid, page, ps, order)
+
+    last = None
+    for attempt in range(retries + 1):
+        with _space_lock:
+            wait = _SPACE_MIN_INTERVAL - (time.time() - _space_last)
+            if wait > 0:
+                time.sleep(wait)
+            _space_last = time.time()
+        try:
+            return _get("/x/space/wbi/arc/search", params, signed=True)
+        except Exception as e:
+            if not _is_risk(e):
+                raise
+            last = e
+    raise last
+
+
+def _author_cache_path(cache_dir, mid):
+    return Path(cache_dir) / f"author-{mid}.json" if cache_dir else None
+
+
+def _read_author_cache(cache_dir, mid):
+    p = _author_cache_path(cache_dir, mid)
+    if not p or not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        if time.time() - d.get("fetched_at", 0) > 86400:   # 一天后过期
+            return None
+        return d
+    except Exception:
+        return None
+
+
+def _write_author_cache(cache_dir, mid, items, total):
+    p = _author_cache_path(cache_dir, mid)
+    if not p:
+        return
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(
+                {"mid": mid, "items": items, "total": total, "fetched_at": time.time()},
+                ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass   # 缓存写不进去不影响主流程
 
 
 # ------------------------------------------------------------

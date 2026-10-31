@@ -10,8 +10,10 @@
 import time
 
 import config
+import toolbox
 import videokit.bili as bili
 from toolbox import register
+from videokit import store
 
 DESCRIPTION = {
     "name": "video_search",
@@ -29,12 +31,15 @@ DESCRIPTION = {
                 "type": "string",
                 "description": (
                     "UP 主名字或 mid（bilibili.com/space/<mid> 里那串数字）。"
-                    "★ 这条路径不够稳：B站对 UP 作品列表接口有强风控，"
-                    "没有 cookie 时常被拦（412/-352）。除非用户明确要某个 UP 主的全部作品，"
-                    "否则优先用 query 按主题搜。"
+                    "用于「把这个 UP 主的东西都看一遍」这类批量需求。"
+                    "★ 这个接口被限流，每翻一页要等 7 秒左右，且结果缓存一天；"
+                    "知道 mid 就直接给 mid，省掉一次名字搜索。"
                 ),
             },
-            "limit": {"type": "integer", "description": "返回几条（默认 15，最多 30）"},
+            "limit": {
+                "type": "integer",
+                "description": "返回几条（默认 15）。关键词搜索最多 30；按作者列作品最多 200（一页 30 条，每页约 7 秒）",
+            },
             "min_minutes": {
                 "type": "integer",
                 "description": "只要时长 ≥ 这个分钟数的（想系统学点什么就填 10）",
@@ -87,9 +92,12 @@ def run(arguments):
     if not query and not author:
         return "错误：query 和 author 至少给一个"
 
-    limit = min(int(arguments.get("limit") or 15), 30)
+    # 关键词搜索最多 3 页（约 60 条）；按作者列作品可以要更多（一页 30 条、每页 7 秒）
+    raw_limit = int(arguments.get("limit") or 15)
+    limit = min(raw_limit, 200 if author else 30)
     min_minutes = int(arguments.get("min_minutes") or 0)
     order = arguments.get("order") or "totalrank"
+    root = toolbox.current_workspace() or str(toolbox.PROJECT_ROOT)
 
     try:
         if author:
@@ -131,14 +139,20 @@ def run(arguments):
                 mid = users[0]["mid"]
                 uname = users[0].get("uname") or uname
 
-            items = []
+            items, total = [], 0
             if mid:
+                cache_dir = store.videos_root(root) / "_authors"
                 try:
-                    items = bili.user_videos(mid, limit=limit, order="pubdate")
+                    res = bili.user_videos(
+                        mid, limit=limit, order="pubdate", cache_dir=cache_dir
+                    )
+                    items, total = res["items"], res["total"]
+                    if res.get("cached"):
+                        note += "列表来自今天的缓存；"
+                    if res.get("partial"):
+                        note += "后面几页被限流了，先给到这些；"
                 except Exception as e:
-                    # ★ B站的 UP 主页接口现在带强反爬（412 / -352 风控），
-                    #   硬碰会一直修；这里直接降级，别把死路交给模型去撞。
-                    note += f"TA 的作品列表接口被 B站风控拦下（{str(e)[:40]}），"
+                    note += f"作品列表没取到（{str(e)[:40]}）；"
 
             if not items:
                 try:
@@ -174,10 +188,19 @@ def run(arguments):
         extra = "（试试把 min_minutes 调小，或换个关键词）" if min_minutes else ""
         return f"错误：{title} 没搜到结果{extra}"
 
-    return (
-        f"{title} 找到 {len(items)} 条：\n\n{_table(items)}\n\n"
-        "→ 用 video_fetch 传 BV号取其中一条（不要一次取很多条，先挑）。"
-    )
+    head = f"{title} 找到 {len(items)} 条"
+    if total and total > len(items):
+        head += f"（TA 一共 {total} 个视频，按发布时间倒序取了前 {len(items)} 个）"
+
+    if author:
+        tail = (
+            "→ 批量处理就逐个把 BV号 传给 video_fetch（它会自己走字幕优先）；"
+            "要往后取就把 limit 调大，每页约 7 秒。"
+        )
+    else:
+        tail = "→ 用 video_fetch 传 BV号取其中一条（不要一次取很多条，先挑）。"
+
+    return f"{head}：\n\n{_table(items)}\n\n{tail}"
 
 
 if getattr(config, "ENABLE_VIDEO", True):
