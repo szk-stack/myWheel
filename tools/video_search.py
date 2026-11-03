@@ -116,6 +116,12 @@ def run(arguments):
     order = arguments.get("order") or "totalrank"
     root = toolbox.current_workspace() or str(toolbox.PROJECT_ROOT)
 
+    # ★ 这两个必须**在分支之前**初始化：
+    #   total 原本只在 author 分支里赋值，结果 query 搜索走到最后那行
+    #   `if total and ...` 就炸了（UnboundLocalError）——
+    #   实测线上就是这样连续失败 8 次的，而且报错信息完全看不出根因。
+    items, total = [], 0
+
     try:
         if author:
             # 名字 → mid；已经是数字就直接用
@@ -161,7 +167,6 @@ def run(arguments):
                 mid = top["mid"]
                 uname = top.get("uname") or uname
 
-            items, total = [], 0
             if mid:
                 cache_dir = store.videos_root(root) / "_authors"
                 try:
