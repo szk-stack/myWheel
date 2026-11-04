@@ -65,6 +65,8 @@ flowchart LR
   | 事件 | 结构 | 何时产出 |
   |---|---|---|
   | 文字增量 | `{"type": "text", "text": "一小段"}` | 收到一个 delta 就立刻产出（打字机源头） |
+  | 思考增量 | `{"type": "reasoning", "text": "…"}` | 收到 `reasoning_content` 就产出（只进链路日志） |
+  | 用量回执 | `{"type": "usage", "usage": {...}}` | 流的**最后一包**（`choices` 为空数组，见 §4.2） |
   | 工具调用 | `{"type": "tool_calls", "tool_calls": [{"id", "name", "arguments"}, ...]}` | **流结束时**才产出（因为要拼完整，见 §4.3） |
 
 - **注意**：事件里 `arguments` 是**原始 JSON 字符串**（未解析）——
@@ -80,8 +82,14 @@ flowchart LR
 
 ```
 chat():        { "model": ..., "messages": ... }
-chat_stream(): { "model": ..., "messages": ..., "stream": true, "tools": [...]? }
+chat_stream(): { "model": ..., "messages": ..., "stream": true, "tools": [...]?,
+                 "stream_options": {"include_usage": true }? }
 ```
+
+`stream_options.include_usage`（开关 `ENABLE_USAGE_STATS`，默认开）是**必须显式要**的：
+流式响应默认不回 usage，不写这一项就永远拿不到缓存命中数（命中率也就无从算起）。
+代价是流的末尾会多来一包 `choices: []` 的用量包——解析时若不先判断，
+`choices[0]` 会直接下标越界。
 
 统一 `json.dumps(..., ensure_ascii=False)`：中文直接进 JSON，不转 `\uXXXX`。
 

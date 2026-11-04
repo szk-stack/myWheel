@@ -248,6 +248,19 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
         #      并在超阈值时生成新摘要，结果记在 ctx["meta"] 里）
         hooks.run(hooks.before_llm, ctx)
 
+        # ★ 顺手记下"旁路调用"的用量：压缩摘要本身就是一次模型调用，
+        #   它烧掉的 token（以及有没有命中缓存）也要进账本，
+        #   否则命中率会被算低——它可是把一大段对话当输入发出去的。
+        for aux in ctx["meta"].get("aux_usage") or []:
+            usage = tracing.normalize_usage(aux.get("usage"))
+            if not usage:
+                continue
+            trace.setdefault("aux_usage", []).append({
+                "kind": aux.get("kind", "aux"),
+                "usage": usage,
+            })
+            trace["usage"] = tracing.merge_usage(trace.get("usage"), usage)
+
         # ★ 如果刚才发生了压缩，把这件事告诉前端（记账 + 显示压缩卡片 + 用量回落）
         if ctx["meta"].get("new_compaction"):
             new_c = ctx["meta"]["new_compaction"]
@@ -273,6 +286,7 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
             round_started = time.time()
             round_text = ""        # 本轮的文字输出（链路日志用）
             round_reasoning = ""   # 本轮的思考过程（链路日志用）
+            round_usage = None     # 本轮的 token 用量（含缓存命中，链路日志用）
 
             # ★ 链路观测：每轮调模型前，抓一份"实际发送的上下文快照"
             #   ——这是排查问题时的第一现场（压缩后、协议转换后的真实形态）
@@ -290,6 +304,9 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                     yield event                     # 文字直接往外流
                 elif event["type"] == "reasoning":
                     round_reasoning += event["text"]   # 只进链路日志，不转发
+                elif event["type"] == "usage":
+                    # ★ 用量回执：累加进本轮账本（随后并入整条链路）
+                    round_usage = tracing.add_usage(round_usage, event["usage"])
                 elif event["type"] == "tool_calls":
                     pending_calls = event["tool_calls"]
 
@@ -302,6 +319,10 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                 "tool_calls": [],
                 "duration_ms": int((time.time() - round_started) * 1000),
             }
+            if round_usage:
+                # 本轮用量 + 并进整条链路的账本（一个任务可能有很多轮）
+                round_record["usage"] = round_usage
+                trace["usage"] = tracing.merge_usage(trace.get("usage"), round_usage)
             trace["rounds"].append(round_record)
 
             if not pending_calls:

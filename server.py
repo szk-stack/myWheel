@@ -11,6 +11,7 @@ server.py —— 启动入口（用这个文件启动整个项目）
      - 聊天（普通）                （POST /api/chat）         → 交给 engine 处理
      - 聊天（流式）                （POST /api/chat/stream）  → 边收边发，打字机效果
      - 追加事件                    （POST /api/events）       → storage 往日志末尾写（只追加，不重写）
+     - 用量统计                    （GET  /api/cache）        → tracing 汇总缓存命中率
      - 设置工作区                  （POST /api/workspace）    → 校验并创建目录（agent 的活动范围）
 """
 
@@ -79,6 +80,10 @@ class ChatHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/traces":
             # ---- 链路日志：最近的任务执行链路列表（摘要，给左下角"查看链路日志"用）----
             self._send_json(200, {"traces": tracing.list_traces(50)})
+
+        elif self.path == "/api/cache":
+            # ---- 用量统计：缓存命中率 / 按天曲线 / 最近任务的命中情况 ----
+            self._send_json(200, tracing.usage_stats())
 
         elif self.path.startswith("/api/traces/"):
             # ---- 链路日志详情：按 id 取一条完整链路（含每轮上下文快照）----

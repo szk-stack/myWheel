@@ -106,6 +106,14 @@ COMPACT_THRESHOLD_RATIO = 0.7
 # 压缩后保留最近多少条消息（更早的合并成一段摘要）
 KEEP_RECENT_MESSAGES = 12
 
+# ===== 用量统计（缓存命中率）=====
+
+# 流式响应默认不带 usage，必须显式向服务端要（include_usage）。
+# 打开后每次请求都会回一包 token 用量，其中包含缓存命中/未命中数——
+# 「链路日志 → 缓存命中」面板就是靠它算出来的。
+# 只有一种情况需要关掉：换了一家不认 stream_options 的兼容端点（会报 400）。
+ENABLE_USAGE_STATS = True
+
 # ===== 子代理：spawn_agent（让主 agent"派小弟去干活"）=====
 
 # 总开关：True 打开（模型会多出一个 spawn_agent 工具）；

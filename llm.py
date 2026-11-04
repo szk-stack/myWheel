@@ -14,13 +14,16 @@ import urllib.request
 import config
 
 
-def chat(messages):
+def chat(messages, with_usage=False):
     """把完整的消息列表发给模型，返回 AI 的回答（字符串）。
 
     messages 的格式像这样：
         [{"role": "user", "content": "你好"},
          {"role": "assistant", "content": "你好呀！"},
          {"role": "user", "content": "再讲个笑话"}]
+
+    with_usage=True 时返回 (回答, usage 原始字典)——
+    压缩摘要这类"看不见的调用"也要能记进用量账本（缓存命中率要用）。
     """
 
     # 1. 检查有没有填 Key，没填就给一句人话提示
@@ -52,7 +55,13 @@ def chat(messages):
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             data = json.loads(response.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"]
+
+        content = data["choices"][0]["message"]["content"]
+        if with_usage:
+            # usage 里有 prompt_cache_hit_tokens / prompt_cache_miss_tokens
+            # ——缓存命中率就是从这两个数字来的
+            return content, data.get("usage")
+        return content
 
     except urllib.error.HTTPError as e:
         # Key 填错了、余额不足、被限流等等，都会走到这里
@@ -82,6 +91,8 @@ def chat_stream(messages, tools=None):
       {"type": "text", "text": "一小段文字"}      —— 回答的文字增量，来一段吐一段
       {"type": "reasoning", "text": "…"}          —— 模型的思考过程增量
                                                      （不进前端，由引擎记入链路日志）
+      {"type": "usage", "usage": {...}}           —— 本次请求的 token 用量
+                                                     （最后一包，含缓存命中数）
       {"type": "tool_calls", "tool_calls": [...]} —— 模型要求调用工具（流结束时才产出）
 
     参数：
@@ -114,6 +125,11 @@ def chat_stream(messages, tools=None):
     }
     if tools:
         body_dict["tools"] = tools   # ★ 带上工具说明书，模型才知道自己能用什么工具
+
+    # ★ 用量回执：流式响应默认**不带** usage，必须显式要——
+    #   否则缓存命中数永远拿不到（命中率也就无从算起）
+    if getattr(config, "ENABLE_USAGE_STATS", True):
+        body_dict["stream_options"] = {"include_usage": True}
     body = json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
 
     request = urllib.request.Request(
@@ -147,7 +163,16 @@ def chat_stream(messages, tools=None):
                     break    # ★ 官方规定的结束标记
 
                 chunk = json.loads(payload)
-                delta = chunk["choices"][0]["delta"]
+
+                # 情况零：用量回执。它是流的最后一包，**choices 是空数组**——
+                #   所以必须先处理它，否则下面取 choices[0] 会下标越界。
+                if chunk.get("usage"):
+                    yield {"type": "usage", "usage": chunk["usage"]}
+
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
 
                 # 情况一：一段回答文字（就是它让打字机效果一格格动起来）
                 piece = delta.get("content")

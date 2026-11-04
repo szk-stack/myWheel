@@ -152,12 +152,17 @@ def make_compaction(messages, old=None):
         lines.append(f"{speaker}：{message_text(m)}")   # 图片在素材里以"[图片]"占位
     parts.append("\n".join(lines))
 
-    summary = llm.chat([
+    # ★ 摘要本身也是一次模型调用：把 usage 一起带出来，
+    #   交给引擎记进用量账本（不然这部分 token 会从统计里凭空消失）
+    summary, usage = llm.chat([
         {"role": "system", "content": SUMMARY_PROMPT},
         {"role": "user", "content": "\n\n".join(parts)},
-    ])
+    ], with_usage=True)
 
-    return {"summary": summary.strip(), "first_kept_index": new_first}
+    result = {"summary": summary.strip(), "first_kept_index": new_first}
+    if usage:
+        result["usage"] = usage
+    return result
 
 
 def apply_compaction(messages, compaction):
@@ -210,6 +215,11 @@ def compact_plugin(ctx):
             # 前端据此记账（compact 事件）+ 显示压缩卡片 + 用量条回落
             ctx["meta"]["new_compaction"] = new
             ctx["meta"]["tokens_before_compact"] = used
+            # 摘要这次调用的用量，交给引擎记进"旁路调用"账本
+            if new.get("usage"):
+                ctx["meta"].setdefault("aux_usage", []).append(
+                    {"kind": "compact", "usage": new["usage"]}
+                )
 
     # ★ 替换 ctx 里的消息——后续引擎就用这份"瘦身过的"上下文去调模型
     ctx["messages"] = effective

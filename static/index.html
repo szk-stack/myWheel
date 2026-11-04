@@ -991,6 +991,178 @@
     word-break: break-word;
     margin-top: var(--sp-2);
   }
+
+  /* ===== 弹层标签页（任务链路 / 缓存命中）===== */
+  .trace-tabs { display: flex; align-items: center; gap: var(--sp-1); }
+  .trace-tab {
+    border: none;
+    background: none;
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: var(--r-sm);   /* 跟科技极简主题的"切割面板"圆角一致 */
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .trace-tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  .trace-tab.active { background: var(--bg-accent-soft); color: var(--accent); font-weight: 600; }
+  .trace-badge.cache { background: var(--bg-accent-soft); color: var(--accent); }
+
+  /* ===== 缓存命中面板 ===== */
+  .cache-wrap { display: flex; flex-direction: column; gap: var(--sp-3); }
+  .cache-kpis { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+  .cache-kpi {
+    flex: 1 1 130px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .cache-kpi-label { font-size: var(--fs-xs); color: var(--text-muted); }
+  .cache-kpi-value {
+    font-size: var(--fs-2xl);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    line-height: var(--lh-tight);
+  }
+  .cache-kpi-value small { font-size: var(--fs-sm); color: var(--text-muted); margin-left: 2px; }
+  .cache-kpi.hero .cache-kpi-value { color: var(--success); }
+  .cache-kpi.hero.low .cache-kpi-value { color: var(--warning); }
+  .cache-kpi-sub { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; }
+
+  .cache-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--sp-3);
+  }
+  .cache-card-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    margin-bottom: var(--sp-2);
+  }
+
+  .cache-bar {
+    display: flex;
+    height: 10px;
+    border-radius: var(--r-full);
+    overflow: hidden;
+    background: var(--bg-sunken);
+  }
+  .cache-bar .hit { background: var(--success); }
+  .cache-bar .miss { background: var(--border-strong); }
+
+  .cache-legend {
+    display: flex;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+  .cache-legend i {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: 0;
+  }
+  .cache-legend .hit { background: var(--success); }
+  .cache-legend .miss { background: var(--border-strong); }
+
+  /* 按天柱状图 */
+  .cache-days {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--sp-2);
+    height: 150px;
+    padding-top: var(--sp-2);
+  }
+  .cache-day {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    height: 100%;
+    gap: 2px;
+  }
+  .cache-day-rate { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .cache-day-bar {
+    width: 100%;
+    max-width: 36px;
+    display: flex;
+    flex-direction: column;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--bg-sunken);
+  }
+  .cache-day-bar .hit { background: var(--success); }
+  .cache-day-bar .miss { background: var(--border-strong); }
+  .cache-day-date {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  /* 最近任务 */
+  .cache-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: var(--fs-xs);
+  }
+  .cache-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .cache-row-time { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cache-row-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+  }
+  .cache-row-bar {
+    display: flex;
+    width: 64px;
+    height: 6px;
+    border-radius: var(--r-full);
+    overflow: hidden;
+    background: var(--bg-sunken);
+    flex-shrink: 0;
+  }
+  .cache-row-bar .hit { background: var(--success); }
+  .cache-row-bar .miss { background: var(--border-strong); }
+  .cache-row-rate {
+    width: 44px;
+    text-align: right;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .cache-row-tokens { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .cache-note {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    line-height: var(--lh-base);
+  }
+  .cache-usage { display: flex; flex-direction: column; gap: var(--sp-1); }
+  .cache-empty {
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--sp-5) var(--sp-3);
+    line-height: var(--lh-relaxed);
+    font-size: var(--fs-sm);
+    white-space: pre-line;   /* 说明文字按段落换行，别挤成一大坨 */
+  }
 </style>
 <!-- 主题层：冷调精密（科技极简）。删掉这一行即可回到原来的「暖纸墨」主题 -->
 <link rel="stylesheet" href="/static/theme-tech.css">
@@ -1002,7 +1174,7 @@
     <button id="newBtn">＋ 新建对话</button>
     <ul id="convList"></ul>
     <button id="keyBtn" title="配置大模型 API Key（保存后立即生效）">API Key 配置</button>
-    <button id="traceBtn" title="查看每次任务的完整执行链路">查看链路日志</button>
+    <button id="traceBtn" title="查看执行链路、上下文快照与缓存命中率">查看链路日志</button>
   </aside>
 
   <!-- ===== 右侧：聊天主区域 ===== -->
@@ -1078,7 +1250,10 @@
   <div id="traceOverlay" class="hidden">
     <div id="traceModal">
       <div id="traceModalHead">
-        <span>链路日志</span>
+        <div class="trace-tabs">
+          <button id="tabTraces" class="trace-tab active">任务链路</button>
+          <button id="tabCache" class="trace-tab">缓存命中</button>
+        </div>
         <button id="traceClose" title="关闭（Esc）">✕</button>
       </div>
       <div id="traceBody"></div>
@@ -1166,6 +1341,8 @@ const keyErrEl = document.getElementById("keyErr");
 const keySaveBtnEl = document.getElementById("keySaveBtn");
 const keyCancelBtnEl = document.getElementById("keyCancelBtn");
 const keyCloseEl = document.getElementById("keyClose");
+const tabTracesEl = document.getElementById("tabTraces");      // 标签页：任务链路
+const tabCacheEl = document.getElementById("tabCache");        // 标签页：缓存命中
 
 // ============================================================
 // 二、和后端打交道的小函数
@@ -2306,11 +2483,33 @@ function addCompactionCard(compaction) {
 
 function openTracePanel() {
   traceOverlayEl.classList.remove("hidden");
-  showTraceList();
+  switchTraceTab("traces");
 }
 
 function closeTracePanel() {
   traceOverlayEl.classList.add("hidden");
+}
+
+// 视图令牌：每次重绘 +1。异步请求回来时如果令牌变了，说明用户已经切走了，
+// 直接把结果丢掉——否则"列表"的慢请求会把已经画好的"缓存面板"覆盖掉。
+let traceViewSeq = 0;
+
+function beginTraceView() {
+  traceViewSeq += 1;
+  traceBodyEl.innerHTML = "";
+  return traceViewSeq;
+}
+
+function isCurrentTraceView(seq) {
+  return seq === traceViewSeq;
+}
+
+// 两个标签页：任务链路 / 缓存命中（同一份数据源，两种视角）
+function switchTraceTab(tab) {
+  tabTracesEl.classList.toggle("active", tab === "traces");
+  tabCacheEl.classList.toggle("active", tab === "cache");
+  if (tab === "cache") showCachePanel();
+  else showTraceList();
 }
 
 // 小工具：造一个带 class / 文本的元素（这一节的渲染都用它，省重复代码）
@@ -2323,11 +2522,12 @@ function el(tag, cls, text) {
 
 // ---------- 链路列表 ----------
 async function showTraceList() {
-  traceBodyEl.innerHTML = "";
+  const seq = beginTraceView();
   traceBodyEl.appendChild(el("div", "trace-empty", "正在读取链路…"));
   try {
     const res = await fetch("/api/traces");
     const data = await res.json();
+    if (!isCurrentTraceView(seq)) return;    // 已经切到别的标签页了，丢弃
     const traces = data.traces || [];
     traceBodyEl.innerHTML = "";
     if (!traces.length) {
@@ -2337,6 +2537,7 @@ async function showTraceList() {
     }
     traces.forEach(function (t) { traceBodyEl.appendChild(buildTraceItem(t)); });
   } catch (err) {
+    if (!isCurrentTraceView(seq)) return;
     traceBodyEl.innerHTML = "";
     traceBodyEl.appendChild(el("div", "trace-empty", "读取失败：确认后端服务在运行"));
   }
@@ -2349,6 +2550,11 @@ function buildTraceItem(t) {
   const ms = t.duration_ms || 0;
   [t.started_at || "", "轮次 " + (t.rounds || 0), "耗时 " + (ms / 1000).toFixed(1) + "s"]
     .forEach(function (x) { head.appendChild(el("span", "", x)); });
+  // 缓存命中率（没有 usage 的老链路不显示——那时候还没采集）
+  const u = t.usage;
+  if (u && u.hit_rate !== null && u.hit_rate !== undefined) {
+    head.appendChild(el("span", "trace-badge cache", "缓存 " + u.hit_rate + "%"));
+  }
   head.appendChild(el("span",
     "trace-badge" + (t.status === "error" ? " err" : ""),
     t.status === "error" ? "出错" : (t.status === "interrupted" ? "中断" : "完成")));
@@ -2360,19 +2566,27 @@ function buildTraceItem(t) {
 
 // ---------- 链路详情 ----------
 async function showTraceDetail(id) {
-  traceBodyEl.innerHTML = "";
-  const back = el("button", "trace-back", "← 返回列表");
-  back.addEventListener("click", showTraceList);
-  traceBodyEl.appendChild(back);
+  const seq = beginTraceView();
+  traceBodyEl.appendChild(el("div", "trace-empty", "正在读取链路…"));
   try {
     const res = await fetch("/api/traces/" + encodeURIComponent(id));
+    if (!isCurrentTraceView(seq)) return;
+
+    traceBodyEl.innerHTML = "";
+    const back = el("button", "trace-back", "← 返回列表");
+    back.addEventListener("click", showTraceList);
+    traceBodyEl.appendChild(back);
+
     if (!res.ok) {
       traceBodyEl.appendChild(el("div", "trace-empty", "没有找到这条链路（可能已被清理）"));
       return;
     }
     const t = await res.json();
+    if (!isCurrentTraceView(seq)) return;
     traceBodyEl.appendChild(buildTraceDetail(t));
   } catch (err) {
+    if (!isCurrentTraceView(seq)) return;
+    traceBodyEl.innerHTML = "";
     traceBodyEl.appendChild(el("div", "trace-empty", "读取失败：确认后端服务在运行"));
   }
 }
@@ -2389,6 +2603,14 @@ function buildTraceDetail(t) {
     "工作区：" + (t.workspace || "项目目录"),
     "状态：" + (t.status === "ok" ? "完成" : (t.status || "-")),
   ].forEach(function (x) { head.appendChild(el("span", "", x)); });
+
+  // 整条链路的缓存命中（没有就是老链路，或者端点没回 usage）
+  if (t.usage && t.usage.hit_rate !== null && t.usage.hit_rate !== undefined) {
+    head.appendChild(el("span", "",
+      "缓存命中：" + t.usage.hit_rate + "%（" +
+      fmtTokens(t.usage.cache_hit_tokens) + " / " +
+      fmtTokens(t.usage.cache_hit_tokens + t.usage.cache_miss_tokens) + "）"));
+  }
   wrap.appendChild(head);
 
   if (t.error) wrap.appendChild(el("div", "trace-reasoning", "错误：" + t.error));
@@ -2407,18 +2629,39 @@ function buildTraceRound(r) {
   d.className = "trace-round";
   if ((r.index || 0) === 0) d.open = true;   // 第一轮默认展开
 
+  const ru = r.usage;
+  let usageTag = "";
+  if (ru) {
+    usageTag = " · 输入 " + fmtTokens(ru.prompt_tokens) +
+      " · 缓存 " + (ru.hit_rate === null || ru.hit_rate === undefined ? "—" : ru.hit_rate + "%");
+  }
+
   d.appendChild(el("summary", "trace-round-head",
     "第 " + ((r.index || 0) + 1) + " 轮 · " + (r.duration_ms || 0) + "ms · " +
     "请求 " + (((r.request || {}).message_count) || 0) + " 条消息 · " +
-    "工具 " + ((r.tool_calls || []).length) + " 次"));
+    "工具 " + ((r.tool_calls || []).length) + " 次" + usageTag));
 
   const body = el("div", "trace-round-body");
+
+  // 小标题的编号是动态的：老链路没有 usage，就不会出现"①"却直接跳到"②"
+  const NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"];
+  let sectionNo = 0;
+  function nextSection(title) {
+    body.appendChild(el("div", "trace-section-title",
+      (NUMS[sectionNo] || (sectionNo + 1) + ".") + " " + title));
+    sectionNo += 1;
+  }
+
+  // 本轮用量：命中多少、未命中多少、输出多少
+  if (ru) {
+    nextSection("本轮用量");
+    body.appendChild(buildUsageLine(ru));
+  }
 
   // ① 上下文结构（逐条消息，点开看全文）
   const req = r.request || {};
   const toolsText = (req.tools || []).join(", ") || "无";
-  body.appendChild(el("div", "trace-section-title",
-    "① 发给模型的上下文结构（" + (req.messages || []).length + " 条）· 工具：" + toolsText));
+  nextSection("发给模型的上下文结构（" + (req.messages || []).length + " 条）· 工具：" + toolsText);
   (req.messages || []).forEach(function (m) {
     const msg = document.createElement("details");
     msg.className = "trace-msg role-" + (m.role || "unknown");
@@ -2440,18 +2683,18 @@ function buildTraceRound(r) {
   });
 
   // ② 思考过程
-  body.appendChild(el("div", "trace-section-title", "② 模型思考过程"));
+  nextSection("模型思考过程");
   body.appendChild(el("div", "trace-reasoning", r.reasoning || "（本轮没有思考内容）"));
 
   // ③ 本轮输出
   if (r.text) {
-    body.appendChild(el("div", "trace-section-title", "③ 模型输出（本轮）"));
+    nextSection("模型输出（本轮）");
     body.appendChild(el("div", "trace-footer-text", r.text));
   }
 
   // ④ 工具调用
   if ((r.tool_calls || []).length) {
-    body.appendChild(el("div", "trace-section-title", "④ 工具调用"));
+    nextSection("工具调用");
     r.tool_calls.forEach(function (c) {
       const box = el("div", "trace-tool");
       box.appendChild(el("div", "trace-tool-meta",
@@ -2613,6 +2856,203 @@ async function refreshKeyBadge() {
 }
 
 // ============================================================
+// 六·B、缓存命中：把 usage 账本画成图表
+// ------------------------------------------------------------
+// 数据来源：GET /api/cache → tracing.usage_stats()
+//   命中率 = 命中 token ÷（命中 + 未命中）
+//   绿 = 命中（省钱的），灰 = 未命中（按原价计的）
+// ============================================================
+
+// 数字格式化：12345 → 12.3k（图表里字很小，别塞长数字）
+function fmtTokens(n) {
+  n = Number(n) || 0;
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return String(Math.round(n));
+}
+
+// 横向堆叠条：命中段按比例撑开，剩下的给未命中
+function buildStackBar(hit, miss, cls) {
+  const bar = el("div", cls || "cache-bar");
+  const total = (hit || 0) + (miss || 0);
+  if (total > 0) {
+    const h = el("div", "hit");
+    h.style.width = ((hit || 0) / total * 100) + "%";
+    const m = el("div", "miss");
+    m.style.width = ((miss || 0) / total * 100) + "%";
+    bar.appendChild(h);
+    bar.appendChild(m);
+  }
+  return bar;
+}
+
+// 一轮 / 一条链路用量的文字 + 小条（链路详情里用）
+function buildUsageLine(u) {
+  const box = el("div", "cache-usage");
+  box.appendChild(buildStackBar(u.cache_hit_tokens, u.cache_miss_tokens));
+  const rate = (u.hit_rate === null || u.hit_rate === undefined) ? "—" : u.hit_rate + "%";
+  box.appendChild(el("div", "cache-note",
+    "输入 " + (u.prompt_tokens || 0).toLocaleString() + " tok" +
+    "（命中 " + (u.cache_hit_tokens || 0).toLocaleString() +
+    " / 未命中 " + (u.cache_miss_tokens || 0).toLocaleString() + "）" +
+    " · 命中率 " + rate +
+    " · 输出 " + (u.completion_tokens || 0).toLocaleString() + " tok"));
+  return box;
+}
+
+async function showCachePanel() {
+  const seq = beginTraceView();
+  traceBodyEl.appendChild(el("div", "trace-empty", "正在统计用量…"));
+  try {
+    const res = await fetch("/api/cache");
+    const data = await res.json();
+    if (!isCurrentTraceView(seq)) return;    // 已经切走了，别覆盖别人的画面
+    traceBodyEl.innerHTML = "";
+    traceBodyEl.appendChild(buildCachePanel(data));
+  } catch (err) {
+    if (!isCurrentTraceView(seq)) return;
+    traceBodyEl.innerHTML = "";
+    traceBodyEl.appendChild(el("div", "trace-empty", "读取失败：确认后端服务在运行"));
+  }
+}
+
+function buildCachePanel(data) {
+  const wrap = el("div", "cache-wrap");
+  const totals = data.totals || {};
+  const requests = totals.requests || 0;
+
+  // 一条数据都没有：说清"为什么空"，别让人以为坏了
+  if (!requests) {
+    const box = el("div", "cache-empty");
+    box.textContent =
+      "还没有可统计的用量。\n" +
+      "命中率来自每次请求返回的 usage（prompt_cache_hit_tokens / prompt_cache_miss_tokens），" +
+      "发出第一条消息后这里就会开始积累。\n" +
+      "之前的历史链路没有记录 usage，无法回溯补算。";
+    wrap.appendChild(box);
+    return wrap;
+  }
+
+  const rate = totals.hit_rate;
+  const hit = totals.cache_hit_tokens || 0;
+  const miss = totals.cache_miss_tokens || 0;
+  const prompt = totals.prompt_tokens || 0;
+
+  // ---------- ① KPI ----------
+  const kpis = el("div", "cache-kpis");
+
+  const hero = el("div", "cache-kpi hero" + (rate !== null && rate < 40 ? " low" : ""));
+  hero.appendChild(el("div", "cache-kpi-label", "缓存命中率"));
+  const hv = el("div", "cache-kpi-value", rate === null ? "—" : String(rate));
+  if (rate !== null) hv.appendChild(el("small", "", "%"));
+  hero.appendChild(hv);
+  hero.appendChild(el("div", "cache-kpi-sub",
+    rate === null ? "服务端没回缓存字段"
+                  : "命中 " + fmtTokens(hit) + " / 输入 " + fmtTokens(prompt)));
+  kpis.appendChild(hero);
+
+  [
+    ["输入 token", fmtTokens(prompt), "命中 " + fmtTokens(hit) + " · 未命中 " + fmtTokens(miss)],
+    ["请求次数", String(requests), (totals.cache_reported_requests || 0) + " 次带缓存回报"],
+    ["输出 token", fmtTokens(totals.completion_tokens || 0), "completion_tokens 累计"],
+  ].forEach(function (item) {
+    const card = el("div", "cache-kpi");
+    card.appendChild(el("div", "cache-kpi-label", item[0]));
+    card.appendChild(el("div", "cache-kpi-value", item[1]));
+    card.appendChild(el("div", "cache-kpi-sub", item[2]));
+    kpis.appendChild(card);
+  });
+  wrap.appendChild(kpis);
+
+  // ---------- ② 总体构成 ----------
+  const barCard = el("div", "cache-card");
+  barCard.appendChild(el("div", "cache-card-title", "总体构成（按输入 token）"));
+  barCard.appendChild(buildStackBar(hit, miss));
+  const legend = el("div", "cache-legend");
+  const l1 = el("span", "");
+  l1.appendChild(el("i", "hit"));
+  l1.appendChild(document.createTextNode("命中 " + fmtTokens(hit)));
+  const l2 = el("span", "");
+  l2.appendChild(el("i", "miss"));
+  l2.appendChild(document.createTextNode("未命中 " + fmtTokens(miss)));
+  legend.appendChild(l1);
+  legend.appendChild(l2);
+  barCard.appendChild(legend);
+  wrap.appendChild(barCard);
+
+  // ---------- ③ 按天柱状图 ----------
+  const series = data.series || [];
+  if (series.length) {
+    const card = el("div", "cache-card");
+    card.appendChild(el("div", "cache-card-title",
+      "按天命中率（最近 " + series.length + " 天）"));
+
+    const days = el("div", "cache-days");
+    const maxTotal = Math.max.apply(null, series.map(function (d) {
+      return (d.cache_hit_tokens || 0) + (d.cache_miss_tokens || 0);
+    }).concat([1]));
+
+    series.forEach(function (d) {
+      const total = (d.cache_hit_tokens || 0) + (d.cache_miss_tokens || 0);
+      const col = el("div", "cache-day");
+      col.title = d.date +
+        " · 输入 " + (d.prompt_tokens || 0).toLocaleString() + " tok" +
+        " · 命中率 " + (d.hit_rate === null ? "—" : d.hit_rate + "%");
+      col.appendChild(el("div", "cache-day-rate",
+        d.hit_rate === null ? "—" : d.hit_rate + "%"));
+
+      const bar = el("div", "cache-day-bar");
+      // 高度按"当天输入量 ÷ 全期最大输入量"缩放；最小 3% 留个可见的底
+      bar.style.height = Math.max(3, total / maxTotal * 78) + "%";
+      const h = el("div", "hit");
+      h.style.height = (total ? (d.cache_hit_tokens || 0) / total * 100 : 0) + "%";
+      const m = el("div", "miss");
+      m.style.height = (total ? (d.cache_miss_tokens || 0) / total * 100 : 100) + "%";
+      bar.appendChild(h);
+      bar.appendChild(m);
+
+      col.appendChild(bar);
+      col.appendChild(el("div", "cache-day-date", d.date.slice(5)));
+      days.appendChild(col);
+    });
+    card.appendChild(days);
+    wrap.appendChild(card);
+  }
+
+  // ---------- ④ 最近任务 ----------
+  const recent = data.recent || [];
+  if (recent.length) {
+    const card = el("div", "cache-card");
+    card.appendChild(el("div", "cache-card-title", "最近任务"));
+    recent.forEach(function (r) {
+      const u = r.usage || {};
+      const row = el("div", "cache-row");
+      row.title = r.user_preview || "";
+      row.appendChild(el("div", "cache-row-time", (r.started_at || "").slice(11, 16) || "--:--"));
+      row.appendChild(el("div", "cache-row-preview", r.user_preview || "（没有用户消息）"));
+      row.appendChild(buildStackBar(u.cache_hit_tokens, u.cache_miss_tokens, "cache-row-bar"));
+      row.appendChild(el("div", "cache-row-rate",
+        (u.hit_rate === null || u.hit_rate === undefined) ? "—" : u.hit_rate + "%"));
+      row.appendChild(el("div", "cache-row-tokens", fmtTokens(u.prompt_tokens)));
+      card.appendChild(row);
+    });
+    wrap.appendChild(card);
+  }
+
+  // ---------- ⑤ 口径说明 ----------
+  const note = el("div", "cache-card");
+  note.appendChild(el("div", "cache-card-title", "口径说明"));
+  note.appendChild(el("div", "cache-note",
+    "命中率 = 缓存命中 token ÷（命中 + 未命中），只统计服务端回了缓存字段的请求。" +
+    "同一会话里第 1 轮必然全部未命中（缓存要先把前缀写进去），之后带着更长的历史重发，" +
+    "前缀没变的部分就能命中。\n" +
+    "压缩上下文、改系统提示词、换工作区都会让前缀变化——命中率掉一截是正常现象，不是故障。"));
+  wrap.appendChild(note);
+
+  return wrap;
+}
+
+// ============================================================
 // 七、启动：页面打开时，先读状态，再画出界面
 // ============================================================
 async function init() {
@@ -2669,6 +3109,8 @@ input.addEventListener("paste", function (e) {
 // 链路日志：左下角按钮打开；关闭按钮 / 点遮罩 / Esc 都能关
 traceBtnEl.addEventListener("click", openTracePanel);
 traceCloseEl.addEventListener("click", closeTracePanel);
+tabTracesEl.addEventListener("click", function () { switchTraceTab("traces"); });
+tabCacheEl.addEventListener("click", function () { switchTraceTab("cache"); });
 traceOverlayEl.addEventListener("click", function (e) {
   if (e.target === traceOverlayEl) closeTracePanel();
 });

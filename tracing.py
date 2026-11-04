@@ -7,6 +7,7 @@ agent 执行（可能包含多轮"调模型 ⇄ 执行工具"）。每条链路�
   - 每轮**实际发给模型的上下文结构**（请求快照）
   - 模型的**思考过程**（reasoning）
   - 模型的文字输出与**工具调用**（参数 / 结果 / 耗时）
+  - 每轮的 **token 用量与缓存命中**（命中率 = 命中 ÷（命中 + 未命中））
   - 最终回答、错误、总耗时
 
 存进 traces.jsonl（一行一条，追加写）。
@@ -73,6 +74,210 @@ def save_safe(trace):
         print(f"[警告] 链路日志写入失败：{e}")
 
 
+# ------------------------------------------------------------
+# 用量账本：token 花了多少、其中多少命中了前缀缓存
+# ------------------------------------------------------------
+#
+# 为什么要单独一套字段名：
+#   各家兼容端点的叫法不一样——DeepSeek 是 prompt_cache_hit_tokens /
+#   prompt_cache_miss_tokens；OpenAI 风格是 prompt_tokens_details.cached_tokens；
+#   Anthropic 风格是 cache_read_input_tokens。这里统一成一套内部格式，
+#   上层（引擎 / 接口 / 前端）只认内部这套。
+#
+# 命中率的口径（很重要，别算错）：
+#   命中率 = 命中 token ÷ (命中 + 未命中)，**只统计"服务端报了缓存信息"的请求**。
+#   没报缓存的端点，不能算成 0%——那会把整体数字拉低成假的。
+
+_NUMERIC_USAGE_KEYS = (
+    "requests", "cache_reported_requests",
+    "prompt_tokens", "cache_hit_tokens", "cache_miss_tokens",
+    "completion_tokens", "total_tokens",
+)
+
+
+def _num(value):
+    """尽量把值变成非负整数（None / 脏数据都当 0）。"""
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def empty_usage():
+    """一份"零用量"账本（累加的起点）。"""
+    return {k: 0 for k in _NUMERIC_USAGE_KEYS}
+
+
+def normalize_usage(raw):
+    """把一次请求的原始 usage 转成内部格式；不是字典就返回 None。
+
+    内部格式（键固定，方便累加）：
+      requests / cache_reported_requests
+      prompt_tokens / cache_hit_tokens / cache_miss_tokens
+      completion_tokens / total_tokens
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+
+    details = raw.get("prompt_tokens_details") or {}
+    prompt = _num(raw.get("prompt_tokens"))
+    completion = _num(raw.get("completion_tokens"))
+    total = _num(raw.get("total_tokens")) or (prompt + completion)
+
+    # 缓存命中：三种叫法都认
+    hit_raw = raw.get("prompt_cache_hit_tokens")
+    if hit_raw is None:
+        hit_raw = raw.get("cache_read_input_tokens")
+    if hit_raw is None:
+        hit_raw = details.get("cached_tokens")
+
+    miss_raw = raw.get("prompt_cache_miss_tokens")
+    if miss_raw is None:
+        miss_raw = details.get("miss_tokens")
+
+    reported = hit_raw is not None or miss_raw is not None
+    if hit_raw is not None:
+        hit = _num(hit_raw)
+        miss = _num(miss_raw) if miss_raw is not None else max(prompt - hit, 0)
+    elif miss_raw is not None:
+        miss = _num(miss_raw)
+        hit = max(prompt - miss, 0)
+    else:
+        hit = miss = 0
+
+    u = empty_usage()
+    u.update({
+        "requests": 1,
+        "cache_reported_requests": 1 if reported else 0,
+        "prompt_tokens": prompt,
+        "cache_hit_tokens": hit,
+        "cache_miss_tokens": miss,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    })
+    return u
+
+
+def merge_usage(acc, usage):
+    """把一份用量累加进账本（acc 为 None 时新建）。返回账本。"""
+    if not isinstance(usage, dict):
+        return acc
+    if acc is None:
+        acc = empty_usage()
+    for key in _NUMERIC_USAGE_KEYS:
+        acc[key] = _num(acc.get(key)) + _num(usage.get(key))
+    return acc
+
+
+def add_usage(acc, raw):
+    """把一次原始 usage 归一化后累加进账本。"""
+    return merge_usage(acc, normalize_usage(raw))
+
+
+def hit_rate(usage):
+    """命中率（百分数，保留一位小数）；没有缓存数据时返回 None。"""
+    if not isinstance(usage, dict):
+        return None
+    hit = _num(usage.get("cache_hit_tokens"))
+    miss = _num(usage.get("cache_miss_tokens"))
+    if hit + miss <= 0:
+        return None
+    return round(hit * 100.0 / (hit + miss), 1)
+
+
+def _with_rate(usage):
+    """账本副本 + 命中率（给接口/前端直接用，省得两边各算一遍）。"""
+    out = dict(usage)
+    out["hit_rate"] = hit_rate(usage)
+    return out
+
+
+def _coerce_usage(u):
+    """兼容"原始 usage"和"已归一化的账本"两种形态。"""
+    if not isinstance(u, dict) or not u:
+        return None
+    if "cache_hit_tokens" in u or "cache_miss_tokens" in u:
+        return merge_usage(None, u)
+    return normalize_usage(u)
+
+
+def _usage_brief(u):
+    """链路列表里用的小结（只留前端要显示的几项）。"""
+    u = _coerce_usage(u)
+    if not u:
+        return None
+    return {
+        "requests": u["requests"],
+        "prompt_tokens": u["prompt_tokens"],
+        "cache_hit_tokens": u["cache_hit_tokens"],
+        "cache_miss_tokens": u["cache_miss_tokens"],
+        "completion_tokens": u["completion_tokens"],
+        "hit_rate": hit_rate(u),
+    }
+
+
+def _decorate(trace):
+    """给链路副本里的账本补上算好的命中率（落盘数据不动，只动显示用的副本）。"""
+    out = dict(trace)
+
+    u = _coerce_usage(out.get("usage"))
+    if u:
+        out["usage"] = _with_rate(u)
+
+    rounds = []
+    for r in trace.get("rounds") or []:
+        r2 = dict(r)
+        ru = _coerce_usage(r2.get("usage"))
+        if ru:
+            r2["usage"] = _with_rate(ru)
+        rounds.append(r2)
+    out["rounds"] = rounds
+    return out
+
+
+def usage_stats(days=14, recent=12):
+    """汇总所有链路里的用量，给「缓存命中」面板用。
+
+    返回：
+      totals  总账本（含 hit_rate）
+      series  按天聚合（最近 days 天，日期升序，画柱状图用）
+      recent  最近 recent 条任务的用量（新的在前，画列表用）
+    """
+    total = None
+    daily = {}
+    rows = []
+
+    for t in _read_all():
+        u = _coerce_usage(t.get("usage"))
+        if not u:
+            continue
+
+        total = merge_usage(total, u)
+
+        day = (t.get("started_at") or "")[:10]
+        if day:
+            daily[day] = merge_usage(daily.get(day), u)
+
+        rows.append({
+            "id": t.get("id"),
+            "started_at": t.get("started_at"),
+            "source": t.get("source", "main"),
+            "status": t.get("status"),
+            "user_preview": _first_user_text(t),
+            "usage": _with_rate(u),
+        })
+
+    series = []
+    for day in sorted(daily)[-days:]:
+        series.append({"date": day, **_with_rate(daily[day])})
+
+    return {
+        "totals": _with_rate(total) if total else _with_rate(empty_usage()),
+        "series": series,
+        "recent": rows[-recent:][::-1],
+    }
+
+
 def list_traces(limit=50):
     """列出最近的链路摘要（不带完整上下文快照，给列表页用）。"""
     items = _read_all()
@@ -89,15 +294,20 @@ def list_traces(limit=50):
             "rounds": len(t.get("rounds") or []),
             "user_preview": _first_user_text(t),
             "final_preview": (t.get("final_text") or "")[:80],
+            "usage": _usage_brief(t.get("usage")),
         })
     return result
 
 
 def get_trace(trace_id):
-    """按 id 取一条完整链路；找不到返回 None。"""
+    """按 id 取一条完整链路；找不到返回 None。
+
+    取出时顺手把命中率算好（usage / 每一轮都补上 hit_rate）——
+    前端只管显示，不用自己再算一遍、也不会因为漏算而显示"—"。
+    """
     for t in _read_all():
         if t.get("id") == trace_id:
-            return t
+            return _decorate(t)
     return None
 
 
