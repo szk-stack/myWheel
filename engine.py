@@ -95,8 +95,13 @@ def _image_data_url(path):
     """
     import base64
 
-    p = (toolbox.PROJECT_ROOT / path).resolve()
-    if not p.is_relative_to(toolbox.PROJECT_ROOT) or not p.is_file():
+    import envconfig
+
+    # 图片是运行时数据，跟着 MYWHEEL_DATA_DIR 走，不再固定在项目根。
+    # 事件日志里存的仍是 "uploads/xxx.png" 这种相对路径，格式没变。
+    root = envconfig.data_dir()
+    p = (root / path).resolve()
+    if not p.is_relative_to(root) or not p.is_file():
         return None
     mime = {
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",

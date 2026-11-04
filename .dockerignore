@@ -1,0 +1,32 @@
+# 构建镜像时排除的东西
+#
+# 原则：代码和知识库语料要进镜像，运行时数据和凭据一律不进。
+
+# ---- 版本库 / 缓存 ----
+.git/
+.gitignore
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.screenshots/
+.mypy_cache/
+tests/
+eval/
+
+# ---- 运行时数据：这些要用 -v 挂宿主机目录，绝不打进镜像 ----
+data.jsonl
+data.json
+data.json.bak
+traces.jsonl
+uploads/
+videos/
+
+# ---- 凭据：等同密码，绝不进镜像（改用 MYWHEEL_* 环境变量注入）----
+config.py
+api_key.json
+bili_cookie.json
+
+# 注意：docs/、knowledge/、README.md 是知识库语料
+#（config.KNOWLEDGE_SOURCES），必须留在镜像里，别为了瘦身排掉。
+# config.example.py 也必须留：容器里没有 config.py 时靠它兜底。

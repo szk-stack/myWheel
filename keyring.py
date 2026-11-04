@@ -19,9 +19,11 @@ import json
 from pathlib import Path
 
 import config
+import envconfig
 
 # 界面保存的 Key 单独放这里（已加入 .gitignore）
-KEY_FILE = Path(__file__).resolve().parent / "api_key.json"
+# ★ 跟数据目录走：容器里挂在宿主机上，重建容器不会把界面配的 Key 弄丢。
+KEY_FILE = envconfig.data_dir() / "api_key.json"
 
 # 固定长度的纯星号：连头尾字符都不泄露，长度也不随真实 Key 变化
 MASK = "•" * 16
@@ -31,7 +33,10 @@ def load_into_config():
     """服务启动时调用：把上次在界面里保存的 Key 加载成当前生效值。
 
     文件不存在 / 内容坏了就安静跳过——这时用 config.py 里原本的值。
+    优先级：MYWHEEL_API_KEY（部署时显式注入）> api_key.json > config.py。
     """
+    if envconfig.is_set("API_KEY"):
+        return   # 环境变量是最高优先级，别被数据卷里的旧 Key 覆盖回去
     if not KEY_FILE.exists():
         return
     try:

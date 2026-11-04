@@ -1,0 +1,21 @@
+# myWheel 运行时依赖
+#
+# 这份清单是扫过全项目 import 得出的，不是 pip freeze 的快照：
+# 主链路只用到 4 个第三方库，其余全是 Python 标准库。
+# 容器镜像里装这 4 个就够跑网页 / CLI / 知识库 / B站搜索。
+
+requests>=2.31
+numpy>=1.26
+qrcode>=7.4
+zhconv>=1.4
+
+# ---- 以下是可选的，默认不装 ----
+# faster_whisper 和 ctranslate2 只在 ASR_BACKEND="local" 时，
+# 由 videokit/asr.py 在函数内延迟 import（asr.py:49 / :114）。
+# 默认走 VOICE2TEXT_URL 指向的外部转写服务，容器里不需要它们；
+# 装上会把 CUDA / cuDNN 拖进镜像，几百 MB 起步。
+# faster-whisper>=1.0
+# ctranslate2>=4.0
+#
+# qrcode 的 SVG 输出（videokit/login.py:165）用标准库 xml.etree，
+# 不需要额外装 lxml 或 Pillow。

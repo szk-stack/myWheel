@@ -40,12 +40,14 @@ KEEP = (
 )
 
 
-def _project_root():
-    return Path(__file__).resolve().parent.parent
+def _data_root():
+    """B站 cookie 是运行时数据，跟着 MYWHEEL_DATA_DIR 走（默认仍是项目根）。"""
+    from envconfig import data_dir
+    return data_dir()
 
 
 def cookie_path(root=None):
-    return Path(root or _project_root()) / "bili_cookie.json"
+    return Path(root or _data_root()) / "bili_cookie.json"
 
 
 def load_cookie(root=None):

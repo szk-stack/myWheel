@@ -22,11 +22,15 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import envconfig
+
 # 事件日志文件（JSONL 格式：每行一条 JSON 记录）
-LOG_FILE = Path(__file__).resolve().parent / "data.jsonl"
+# ★ 走 data_dir()：容器里用 MYWHEEL_DATA_DIR 指到挂进来的宿主机目录，
+#   容器重建后会话记录还在。本机默认仍是项目根，行为完全不变。
+LOG_FILE = envconfig.data_dir() / "data.jsonl"
 
 # 上一版用的老文件。如果它还在、而新日志还不存在，就自动"搬家"（迁移）
-OLD_JSON_FILE = Path(__file__).resolve().parent / "data.json"
+OLD_JSON_FILE = envconfig.data_dir() / "data.json"
 
 
 # ============================================================

@@ -23,8 +23,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import envconfig
+
 # 链路日志文件（JSONL 格式：一行一条链路）
-TRACE_FILE = Path(__file__).resolve().parent / "traces.jsonl"
+# 和 data.jsonl 一样走数据目录；仍是模块级常量，测试里 patch TRACE_FILE 照常有效。
+TRACE_FILE = envconfig.data_dir() / "traces.jsonl"
 
 # 上下文快照里单条消息的字符上限（"完整结构"也要有个防爆上限）
 MAX_MESSAGE_CHARS = 4000

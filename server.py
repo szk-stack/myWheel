@@ -23,6 +23,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import envconfig
+envconfig.apply()   # ★ 必须排在所有 import config 之前（容器里可能没有 config.py）
+
 import config
 import engine
 import keyring
@@ -30,7 +33,8 @@ import storage
 import toolbox
 import tracing
 
-# 项目根目录（就是本文件所在的位置）
+# 项目根目录（就是本文件所在的位置）——只用来找 static/ 等代码资源，
+# 运行时数据一律走 envconfig.data_dir()，别拿它拼数据路径。
 ROOT = Path(__file__).resolve().parent
 
 
@@ -363,15 +367,15 @@ class ChatHandler(BaseHTTPRequestHandler):
         if ext not in ("png", "jpg", "gif", "webp"):
             raise ValueError(f"不支持的图片格式：{ext}")
 
-        uploads = ROOT / "uploads"
-        uploads.mkdir(exist_ok=True)
+        uploads = envconfig.uploads_dir()
+        uploads.mkdir(parents=True, exist_ok=True)
         filename = f"{time.time_ns()}.{ext}"
         (uploads / filename).write_bytes(raw)
         return f"uploads/{filename}"
 
     def _serve_upload_file(self, relative_path):
         """把 uploads/ 目录里的图片发出去（路径限制在 uploads 内，防越界）。"""
-        uploads_root = (ROOT / "uploads").resolve()
+        uploads_root = envconfig.uploads_dir().resolve()
         target = (uploads_root / relative_path).resolve()
         if not target.is_relative_to(uploads_root) or not target.is_file():
             self.send_error(404, "Not Found")
@@ -404,7 +408,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
 
         if path == "/bili/login/status":
-            info = bili_login.status(str(ROOT))
+            info = bili_login.status(str(envconfig.data_dir()))
             self._send_json(200, info)
             return
 
@@ -425,7 +429,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         if path in ("/bili/login", "/bili/login/", "/bili/login/"):
             # 每次打开页面都重新拿一个二维码（旧的可能已经过期了）
             try:
-                bili_login.start(str(ROOT))
+                bili_login.start(str(envconfig.data_dir()))
             except Exception as e:
                 self.send_error(500, f"生成二维码失败：{e}")
                 return
@@ -498,7 +502,7 @@ class ChatHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    # ⓪ 先加载界面里保存过的 API Key（覆盖 config.py 里的默认值）
+    # ⓪ 先加载界面里保存过的 API Key（优先级低于 MYWHEEL_API_KEY 环境变量）
     #    必须在建系统提示词 / 加载工具之前做，保证任何一次请求拿到的都是最新的 Key
     keyring.load_into_config()
 
@@ -513,18 +517,20 @@ def main():
     #    单线程时，服务器会"守"着一条空闲连接等它的下一个请求，
     #    其他新连接（比如浏览器并行加载多个脚本文件）会被无限排队 → 整页卡死。
     #    ThreadingHTTPServer 给每个连接分配一个线程，这个问题就不存在了。
-    #    绑定 127.0.0.1 表示"只有本机能访问"，安全，而且不会弹防火墙提示
-    address = ("127.0.0.1", config.PORT)
+    #    默认 127.0.0.1 = 只有本机能访问（安全）；容器里用 MYWHEEL_HOST=0.0.0.0
+    #    覆盖，否则容器内的 127.0.0.1 指容器自己，外面连不上。
+    host = getattr(config, "HOST", "127.0.0.1")
+    address = (host, config.PORT)
     try:
         server = ThreadingHTTPServer(address, ChatHandler)
     except OSError:
         print(f"启动失败：端口 {config.PORT} 被占用了！")
-        print("解决办法：打开 config.py，把 PORT 改成 8001 再试。")
+        print("解决办法：设置 MYWHEEL_PORT=8001，或改 config.py 里的 PORT。")
         return
 
     print("=" * 52)
     print("服务已启动！请用浏览器打开：")
-    print(f"    http://localhost:{config.PORT}")
+    print(f"    http://{host}:{config.PORT}")
     print("（在这个终端按 Ctrl+C 可以停止服务）")
     print("=" * 52)
 

@@ -28,6 +28,9 @@ import sys
 import time
 from pathlib import Path
 
+import envconfig
+envconfig.apply()   # ★ 必须排在所有 import config 之前（容器里可能没有 config.py）
+
 import config
 import engine
 import keyring
