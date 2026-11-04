@@ -46,6 +46,22 @@ DESCRIPTION = {
 }
 
 
+def coverage_warning(covered, expect, vid):
+    """转写结果的长度和视频时长对不上时，给一句明确的告警。
+
+    ★ 单独抽出来，是为了能被测试直接盯住：
+      这个判断救过一次——10 分钟的视频转出来是 1 分钟的内容，
+      而段数、耗时、RTF 全都"正常"，只有内容是错的。
+    """
+    if not expect or covered >= expect * 0.9:
+        return ""
+    return (
+        f"\n\n⚠️ 只覆盖到 {timeline.fmt_ts(covered)}，视频总长 "
+        f"{timeline.fmt_ts(expect)}（{covered / expect:.0%}）——内容可能不对。\n"
+        f"先确认视频有没有声音；若音轨正常，删掉 videos/{vid}/audio.m4a 后重抓重转。"
+    )
+
+
 def run(arguments):
     raw_id = (arguments.get("video_id") or "").strip()
     if not raw_id:
@@ -164,15 +180,8 @@ def run(arguments):
     #   这一条能抓住"转错文件"这种最阴的 bug——段数、耗时、RTF 全都正常，
     #   只有内容不对。实测踩过一次：10 分钟的视频转出来是上个 1 分钟视频的稿子，
     #   原因是上传文件名相同、服务端命中了旧缓存。
-    expect = meta.get("duration") or 0
-    covered = segs[-1].t1 if segs else 0
-    warn = ""
-    if expect and covered < expect * 0.9:
-        warn = (
-            f"\n\n⚠️ 只覆盖到 {timeline.fmt_ts(covered)}，视频总长 "
-            f"{timeline.fmt_ts(expect)}（{covered / expect:.0%}）——内容可能不对。\n"
-            f"先确认视频有没有声音；若音轨正常，删掉 videos/{vid}/audio.m4a 后重抓重转。"
-        )
+    warn = coverage_warning(covered=segs[-1].t1 if segs else 0,
+                            expect=meta.get("duration") or 0, vid=vid)
 
     return (
         f"「{meta.get('title', vid)}」转写完成\n"

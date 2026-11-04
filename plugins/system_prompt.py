@@ -19,11 +19,101 @@ token 白花钱。分开之后，变动的只有最后那十几行。
 import config
 import toolbox
 from hooks import before_llm
+from pathlib import Path
 
 # 人设段的起始标记。
 # 用它判断"这条 system 是不是我们插的"，比比较全文更稳——
 # 工作区一变，全文就变了，比全文会被误判成"还没插"，结果插出第二条人设。
 PERSONA_MARK = "<persona>"
+
+# 两个约定的文件名（抄 Pi 的做法）
+AGENTS_FILE = "AGENTS.md"     # 追加式：项目规矩，叠在人设后面
+SYSTEM_FILE = "SYSTEM.md"     # 替换式：整个换掉人设
+
+# 用户级目录：放跨项目通用的规矩
+USER_DIR = Path.home() / ".mywheel"
+
+
+def _find_layered(name, workspace):
+    """从外往里找同名文件，返回 [(路径, 内容)]。
+
+    ★ 顺序为什么是"从外到内"：越靠里越具体，应该覆盖外面的通用规则。
+      模型读到最后一条时，手里握着的是最具体的那个项目的规矩。
+      这和 CSS、.gitignore 的思路是一样的。
+
+    搜索范围：用户级目录 → 项目根 → … → 当前工作区。
+    工作区在项目外面时（比如切到了 D 盘某个素材目录），
+    就只取"用户级 + 工作区本身"，别把无关的父目录也扫进来。
+    """
+    found = []
+    seen = set()
+
+    def take(p):
+        try:
+            p = p.resolve()
+        except Exception:
+            return
+        if p in seen or not p.is_file():
+            return
+        seen.add(p)
+        try:
+            text = p.read_text(encoding="utf-8").strip()
+        except Exception:
+            return
+        if text:
+            found.append((p, text))
+
+    take(USER_DIR / name)
+
+    root = Path(toolbox.PROJECT_ROOT).resolve()
+    ws = Path(workspace).resolve() if workspace else root
+
+    if ws == root or ws.is_relative_to(root):
+        # 项目根 → 工作区这条链上，逐层收
+        chain = [root]
+        try:
+            rel = ws.relative_to(root)
+            cur = root
+            for part in rel.parts:
+                cur = cur / part
+                chain.append(cur)
+        except Exception:
+            pass
+        for d in chain:
+            take(d / name)
+    else:
+        # 工作区在项目外：只认它自己那一层
+        take(ws / name)
+
+    return found
+
+
+def _persona(workspace):
+    """人设段：有 SYSTEM.md 就整份替换，没有就用 config 里的默认人设。"""
+    custom = _find_layered(SYSTEM_FILE, workspace)
+    if custom:
+        path, text = custom[-1]        # 最靠里的那份说了算
+        return text, f"（人设来自 {path.name}）"
+    return config.SYSTEM_PROMPT.strip(), ""
+
+
+def _agents_block(workspace):
+    """项目规矩：把找到的 AGENTS.md 按从外到内叠起来。"""
+    files = _find_layered(AGENTS_FILE, workspace)
+    if not files:
+        return ""
+
+    lines = ["<project-instructions>"]
+    for path, text in files:
+        try:
+            shown = path.relative_to(Path(toolbox.PROJECT_ROOT))
+        except Exception:
+            shown = path
+        lines.append(f"<!-- 来自 {shown} -->")
+        lines.append(text)
+        lines.append("")
+    lines.append("</project-instructions>")
+    return "\n".join(lines)
 
 
 def _environment_block():
@@ -57,11 +147,25 @@ def _environment_block():
 
 
 def build_prompt():
-    """拼出完整提示词：固定的规矩在前，变动的现场在后。"""
-    return (
-        f"{PERSONA_MARK}\n{config.SYSTEM_PROMPT.strip()}\n</persona>\n\n"
-        f"{_environment_block()}"
-    )
+    """拼出完整提示词：固定的规矩在前，变动的现场在后。
+
+    四层，从稳到变：
+      <persona>              人设（SYSTEM.md 可整份替换）
+      <project-instructions> 项目规矩（AGENTS.md，从外到内叠加）
+      <environment>          现场（工作区、知识库状态）
+    """
+    workspace = toolbox.current_workspace()
+    persona, persona_note = _persona(workspace)
+    agents = _agents_block(workspace)
+
+    parts = [f"{PERSONA_MARK}\n{persona}\n</persona>"]
+    if persona_note:
+        parts.append(f"<!-- {persona_note} -->")
+    if agents:
+        parts.append(agents)
+    parts.append(_environment_block())
+
+    return "\n\n".join(parts)
 
 
 def add_system_prompt(ctx):

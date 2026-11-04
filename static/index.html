@@ -1337,41 +1337,46 @@ async function manualCompact() {
   }
 }
 
-// 【分支】以某条 AI 回复为界，复制出一个新会话（学 Pi 的 /fork）
-// 原理：把"从开头到这条回复"的消息复制成新事件，追加进日志；
-//       原会话一动不动，新会话拿到一份完全属于自己的历史副本。
-async function branchConversation(sourceId, index) {
+// 【分叉】把某个会话的前 N 条消息复制成一个新会话（学 Pi 的 /fork 与 /tree）
+// ------------------------------------------------------------
+// ★ 为什么要把"复制历史"做成独立事件，而不是直接改原会话：
+//   原会话必须一动不动。用户是拿它当"证据"在看的——
+//   分叉出去试错，回头看原始那条链路还在，这才能对比"两种问法差别在哪"。
+//
+// ★ 必须继承工作区和它的 workspace 事件：
+//   否则分叉出来的会话会悄悄退回项目目录，等于把 agent 的权限范围换掉了。
+//   这种"不声不响换了环境"的问题最难查——它不报错，只是行为不一样。
+async function forkConversation(sourceId, keepCount, titleSuffix) {
   const source = state.conversations.find(function (c) { return c.id === sourceId; });
   if (!source) return;
 
-  // 要带走的家当：从第一条到这条 AI 回复（含它本身）
-  const copied = source.messages.slice(0, index + 1);
+  const copied = source.messages.slice(0, keepCount);
 
-  // 造一个新会话（消息逐条"复印"，和原会话彻底脱钩）
   const newConv = {
     id: "c" + Date.now(),
-    title: source.title + "·分支",
+    title: source.title + titleSuffix,
     messages: copied.map(function (m) {
-      return Object.assign({}, m);   // 浅拷贝一条新对象（tool 条目的字段也原样带上）
+      return Object.assign({}, m);   // 浅拷贝：tool 条目的字段也原样带上
     }),
+    workspace: source.workspace || null,
   };
   state.conversations.unshift(newConv);
   state.current_id = newConv.id;
 
-  // 记账：1 条 session（带"从哪儿来"的血缘标记）+ 复印的所有条目
-  // （branched_from / branched_at 只是备注，回放时会被忽略——旧代码天然兼容）
   const events = [
     {
       type: "session",
       id: newConv.id,
       title: newConv.title,
-      branched_from: sourceId,   // 从哪个会话分支出来的
-      branched_at: index,        // 分支点是第几条消息（从 0 数）
+      branched_from: sourceId,        // 血缘备注（回放时忽略，旧代码天然兼容）
+      branched_at: keepCount - 1,
     },
   ];
+  if (newConv.workspace) {
+    events.push({ type: "workspace", conversation_id: newConv.id, path: newConv.workspace });
+  }
   copied.forEach(function (m) {
     if (m.role === "tool") {
-      // 工具记录也照原样复印一份
       events.push({
         type: "tool",
         conversation_id: newConv.id,
@@ -1379,6 +1384,7 @@ async function branchConversation(sourceId, index) {
         arguments: m.arguments,
         result: m.result,
         ok: m.ok,
+        extra: m.extra || null,
       });
     } else {
       events.push({
@@ -1393,6 +1399,17 @@ async function branchConversation(sourceId, index) {
   await appendEvents(events);
   renderAll();
   input.focus();
+}
+
+// 从某条 AI 回复之后继续（保留这条回复，换个方向往下聊）
+function branchConversation(sourceId, index) {
+  return forkConversation(sourceId, index + 1, "·分支");
+}
+
+// 从某条用户消息重开（丢掉这条和它后面的一切，换个问法再来）
+// 为什么不含这条：这正是"我要重新问"的语义——留着它，就成了"再问一遍同样的话"。
+function rewindConversation(sourceId, index) {
+  return forkConversation(sourceId, index, "·重开");
 }
 
 // ============================================================
@@ -1937,7 +1954,8 @@ function renderMessages() {
         // AI 的回复：附上"坐标"（哪个会话、第几条），悬浮按钮点它时才知道分支哪里
         addBubble("ai", msg.content, { convId: conv.id, index: index });
       } else {
-        addBubble("user", msg.content);
+        // 用户消息也挂一个入口：回到这一步重来（学 Pi 的 /tree）
+        addBubble("user", msg.content, { convId: conv.id, index: index, mode: "rewind" });
       }
     });
   }
@@ -1996,12 +2014,20 @@ function addBubble(role, text, branchInfo) {
 
   // 可分支的消息：在气泡下方放一个按钮
   if (branchInfo) {
+    const isRewind = branchInfo.mode === "rewind";
     const actions = document.createElement("div");
     actions.className = "msg-actions";
     const branchBtn = document.createElement("button");
-    branchBtn.textContent = "分支新对话";
+    branchBtn.textContent = isRewind ? "从这里重开" : "分支新对话";
+    branchBtn.title = isRewind
+      ? "把这条消息之前的历史复制到一个新会话（这条和它之后的不带过去），可以换个问法重来"
+      : "把对话复制成一个新会话，从这条回复之后换个方向继续";
     branchBtn.addEventListener("click", function () {
-      branchConversation(branchInfo.convId, branchInfo.index);
+      if (isRewind) {
+        rewindConversation(branchInfo.convId, branchInfo.index);
+      } else {
+        branchConversation(branchInfo.convId, branchInfo.index);
+      }
     });
     actions.appendChild(branchBtn);
     wrap.appendChild(actions);
