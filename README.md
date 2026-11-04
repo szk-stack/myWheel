@@ -66,6 +66,27 @@ python kb_vector.py build             # 调接口，283 块约 16 秒、4 分钱
 > ⚠️ **装包请用 `python -m pip`，不要直接用 `pip`**——电脑上装过多套 Python 时，
 > 两者可能指向不同环境，`pip install` 完 `import` 却找不到，就是踩了这个坑。
 
+### 不用网页：命令行模式（学 Pi 的 `-p` / `--json`）
+
+同一个引擎，第二个消费端。适合塞进脚本、定时任务、或者 `| grep`：
+
+```bash
+python cli.py "把 videos/ 里的稿子汇总成一份周报"        # 边跑边看（过程打到 stderr）
+python cli.py -p "总结 knowledge/ 里所有文档" > 摘要.md   # 只出答案，适合重定向
+python cli.py --json "列一下当前目录" | jq -r 'select(.type=="tool_call").name'
+echo "现在项目里有多少个测试用例" | python cli.py -       # 从 stdin 读
+python cli.py -w D:/某个素材目录 "把这个目录的视频转成文字"  # 指定工作区
+python cli.py --full-access "读一下 D 盘那个文件"          # 允许跑出工作区
+```
+
+三条约定：
+
+- **正文走 stdout，过程走 stderr**——`> file` 只会拿到干净的答案；
+- `--json` 时 stdout 每行一个事件（`text` / `tool_call` / `tool_result` / `compacted`）；
+- 退出码 `0` 成功、`1` 出错、`2` 参数或 Key 有问题、`130` 手动中断。
+
+工作区默认是**当前目录**（命令行的直觉），要项目目录就加 `--project`。
+
 ---
 
 ## 二、每个文件是干嘛的
@@ -74,6 +95,7 @@ python kb_vector.py build             # 调接口，283 块约 16 秒、4 分钱
 |---|---|---|
 | `config.py` | 所有配置（Key、模型、人设、端口） | ★ 常改 |
 | `server.py` | 启动入口，收发 HTTP 请求 | 基本不动 |
+| `cli.py` | 命令行入口（`-p` / `--json`），和网页共用同一个引擎 | 基本不动 |
 | `engine.py` | 引擎：把流程串起来 | 基本不动 |
 | `llm.py` | 和 DeepSeek 说话 | 基本不动 |
 | `hooks.py` | 空槽机制（核心就是几个列表） | 想加新槽时才动 |
