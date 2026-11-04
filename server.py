@@ -24,6 +24,7 @@ from pathlib import Path
 
 import config
 import engine
+import keyring
 import storage
 import toolbox
 import tracing
@@ -69,6 +70,11 @@ class ChatHandler(BaseHTTPRequestHandler):
                 "baseline_tokens": compact_module.baseline_tokens(),
             }
             self._send_json(200, state)
+
+        elif self.path == "/api/key":
+            # ---- API Key 状态 ----
+            # ★ 只回「配没配」+ 一串星号，明文 Key 绝不下发到浏览器
+            self._send_json(200, keyring.status())
 
         elif self.path == "/api/traces":
             # ---- 链路日志：最近的任务执行链路列表（摘要，给左下角"查看链路日志"用）----
@@ -118,7 +124,15 @@ class ChatHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "请求格式不对：不是合法的 JSON"})
             return
 
-        if self.path == "/api/chat":
+        if self.path == "/api/key":
+            # ---- 保存 API Key ----
+            # 只有点「保存」才会走到这里；取消 / 关闭弹层前端不会发请求
+            try:
+                self._send_json(200, {"ok": True, **keyring.save(data.get("api_key", ""))})
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+
+        elif self.path == "/api/chat":
             # ---- 聊天接口：交给引擎处理 ----
             try:
                 reply = engine.chat(data.get("messages", []))
@@ -479,6 +493,10 @@ class ChatHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    # ⓪ 先加载界面里保存过的 API Key（覆盖 config.py 里的默认值）
+    #    必须在建系统提示词 / 加载工具之前做，保证任何一次请求拿到的都是最新的 Key
+    keyring.load_into_config()
+
     # ① 先加载所有插件（把插件函数挂到空槽上）
     engine.load_plugins()
 

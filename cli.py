@@ -30,6 +30,7 @@ from pathlib import Path
 
 import config
 import engine
+import keyring
 import toolbox
 
 
@@ -88,6 +89,8 @@ def _setup_stdout():
 
 def main(argv=None):
     _setup_stdout()
+    # 和网页端用同一份 Key：界面里保存过的，优先于 config.py 里的默认值
+    keyring.load_into_config()
     args = parse_args(argv)
     prompt = resolve_prompt(args)
 
@@ -96,7 +99,7 @@ def main(argv=None):
         return 2
 
     if not (config.API_KEY or "").strip():
-        print("错误：config.py 里还没填 API_KEY", file=sys.stderr)
+        print("错误：还没填 API_KEY（可在网页左下角「API Key」里配置，或填进 config.py）", file=sys.stderr)
         return 2
 
     if args.max_rounds is not None:

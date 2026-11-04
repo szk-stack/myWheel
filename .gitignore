@@ -10,6 +10,8 @@ traces.jsonl
 # ===== 本地配置（里面有你的 API Key，千万不要提交！）=====
 # 换电脑/新克隆仓库时，请复制 config.example.py 为 config.py 再填 Key
 config.py
+# 界面里保存的 Key（keyring.py 写的文件，等同密码，同样不进版本库）
+api_key.json
 
 # ===== 编辑器与工具目录 =====
 .idea/
@@ -24,6 +26,9 @@ sandbox/
 
 # ===== 对话图片（多模态输入的本体文件，不进版本库）=====
 uploads/
+
+# ===== 前端自检截图（screenshot 工具的输出，不进版本库）=====
+.screenshots/
 
 # ===== 知识库索引（从文档生成，可随时用 `python rag.py build` 重建）=====
 knowledge/.index/

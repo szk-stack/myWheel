@@ -688,9 +688,122 @@
     border: 1px solid rgba(255, 255, 255, 0.25);
   }
 
+  /* ===== API Key 配置：左下角「查看链路日志」上方 ===== */
+  #keyBtn {
+    display: block;
+    width: calc(100% - var(--sp-3) * 2);
+    margin: var(--sp-2) var(--sp-3) 0;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    text-align: left;
+  }
+  #keyBtn:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  #keyBtn.configured { color: var(--s600); border-color: var(--s600); }
+
+  /* ===== API Key 配置弹层 ===== */
+  #keyOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(51, 45, 36, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 60;
+  }
+  #keyOverlay.hidden { display: none; }
+  #keyModal {
+    width: min(440px, 92vw);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-pop);
+    overflow: hidden;
+  }
+  #keyModalHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  #keyClose {
+    border: none;
+    background: none;
+    font-size: var(--fs-lg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-sm);
+  }
+  #keyClose:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  #keyBody { padding: var(--sp-4); }
+  #keyState {
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--sp-3);
+  }
+  #keyInput {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    letter-spacing: .06em;
+  }
+  #keyInput.masked { cursor: pointer; color: var(--text-muted); }
+  #keyInput:focus { outline: 2px solid var(--p200); outline-offset: 1px; }
+  #keyHint {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    margin-top: var(--sp-2);
+    line-height: 1.6;
+  }
+  #keyErr {
+    font-size: var(--fs-xs);
+    color: var(--d600);
+    margin-top: var(--sp-2);
+    min-height: 1.1em;
+  }
+  #keyFoot {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  #keyFoot button {
+    padding: var(--sp-2) var(--sp-4);
+    border-radius: var(--r-md);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  #keyCancelBtn {
+    border: 1px solid var(--border-strong);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+  }
+  #keyCancelBtn:hover { background: var(--bg-subtle); }
+  #keySaveBtn {
+    border: 1px solid var(--p600);
+    background: var(--p600);
+    color: var(--text-on-accent);
+  }
+  #keySaveBtn:hover:not(:disabled) { background: var(--p700); }
+  #keySaveBtn:disabled { opacity: .45; cursor: not-allowed; }
+
   /* ===== 链路日志（观测）：左下角入口 ===== */
   #traceBtn {
-    margin: var(--sp-2) var(--sp-3) var(--sp-3);
+    margin: var(--sp-1) var(--sp-3) var(--sp-3);
     padding: var(--sp-2) var(--sp-3);
     border: 1px dashed var(--border-strong);
     border-radius: var(--r-md);
@@ -879,6 +992,8 @@
     margin-top: var(--sp-2);
   }
 </style>
+<!-- 主题层：冷调精密（科技极简）。删掉这一行即可回到原来的「暖纸墨」主题 -->
+<link rel="stylesheet" href="/static/theme-tech.css">
 </head>
 <body>
 
@@ -886,6 +1001,7 @@
   <aside id="sidebar">
     <button id="newBtn">＋ 新建对话</button>
     <ul id="convList"></ul>
+    <button id="keyBtn" title="配置大模型 API Key（保存后立即生效）">API Key 配置</button>
     <button id="traceBtn" title="查看每次任务的完整执行链路">查看链路日志</button>
   </aside>
 
@@ -906,7 +1022,7 @@
         </div>
 
         <!-- 完整权限开关：关着的时候 agent 只能在「工作区」里读写 -->
-        <label id="fullAccessTag" title="关：agent 只能在上面那个工作区里读写。开：允许操作工作区以外的文件（仍会拒绝盘符根目录和系统目录）。只对当前会话生效，刷新页面自动关回去。">
+        <label id="fullAccessTag" title="点一下切换。关：agent 只能在上面那个工作区里读写。开：允许操作工作区以外的文件（仍会拒绝盘符根目录和系统目录），再点一次即可关回去。只对当前会话生效，刷新页面自动关回去。">
           <input type="checkbox" id="fullAccessChk">
           <span id="fullAccessText">完整权限</span>
         </label>
@@ -935,6 +1051,28 @@
       <input type="file" id="imgFile" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="hidden">
     </footer>
   </main>
+
+  <!-- ===== API Key 配置弹层（左下角"API Key 配置"按钮打开） ===== -->
+  <div id="keyOverlay" class="hidden">
+    <div id="keyModal">
+      <div id="keyModalHead">
+        <span>API Key</span>
+        <button id="keyClose" title="关闭（Esc）">✕</button>
+      </div>
+      <div id="keyBody">
+        <div id="keyState">正在读取配置…</div>
+        <!-- 明文 Key 永远不会出现在这个框里：已配置时它只装一串星号 -->
+        <input id="keyInput" type="password" autocomplete="off" spellcheck="false"
+               placeholder="sk-..." />
+        <div id="keyHint"></div>
+        <div id="keyErr"></div>
+      </div>
+      <div id="keyFoot">
+        <button id="keyCancelBtn">取消</button>
+        <button id="keySaveBtn" disabled>保存</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ===== 链路日志弹层（左下角"查看链路日志"按钮打开） ===== -->
   <div id="traceOverlay" class="hidden">
@@ -1018,6 +1156,16 @@ const traceBtnEl = document.getElementById("traceBtn");       // 左下角入口
 const traceOverlayEl = document.getElementById("traceOverlay"); // 弹层遮罩
 const traceBodyEl = document.getElementById("traceBody");      // 弹层内容区
 const traceCloseEl = document.getElementById("traceClose");    // 关闭按钮
+// API Key 配置相关
+const keyBtnEl = document.getElementById("keyBtn");
+const keyOverlayEl = document.getElementById("keyOverlay");
+const keyInputEl = document.getElementById("keyInput");
+const keyStateEl = document.getElementById("keyState");
+const keyHintEl = document.getElementById("keyHint");
+const keyErrEl = document.getElementById("keyErr");
+const keySaveBtnEl = document.getElementById("keySaveBtn");
+const keyCancelBtnEl = document.getElementById("keyCancelBtn");
+const keyCloseEl = document.getElementById("keyClose");
 
 // ============================================================
 // 二、和后端打交道的小函数
@@ -2320,9 +2468,155 @@ function buildTraceRound(r) {
 }
 
 // ============================================================
+// 六·五、API Key 配置
+// ------------------------------------------------------------
+// 三条硬规矩（对应需求）：
+//   ① 后端只回「配没配」+ 一串星号，明文 Key 永不下发到浏览器；
+//   ② 已配置时输入框是只读的星号，点它才变成可编辑的空框，用来填新 Key 覆盖；
+//   ③ 只有点「保存」才 POST 生效；取消 / ✕ / 点遮罩 / Esc 一律不发请求，
+//      弹层里改过的东西全部丢弃。
+// ============================================================
+let keyConfigured = false;  // 当前是否已配置
+let keyEdited = false;      // 用户是否点开了掩码、真的准备填新 Key
+
+function resetKeyForm() {
+  keyEdited = false;
+  keyErrEl.textContent = "";
+  keySaveBtnEl.disabled = true;
+  keySaveBtnEl.textContent = "保存";
+  keyInputEl.value = "";
+  keyInputEl.type = "password";
+  keyInputEl.readOnly = false;
+  keyInputEl.disabled = false;
+  keyInputEl.classList.remove("masked");
+  keyInputEl.placeholder = "sk-...";
+}
+
+// 把输入框刷成「已配置 + 纯星号掩码」。明文一律不进 DOM。
+function fillMasked(d) {
+  keyConfigured = true;
+  keyEdited = false;
+  keySaveBtnEl.disabled = true;
+  keySaveBtnEl.textContent = "保存";
+  keyErrEl.textContent = "";
+  keyBtnEl.classList.add("configured");
+  keyStateEl.textContent = "已配置 Key（明文不会显示）";
+  // 用 text 类型：password 会把每个字符再套一层圆点，反而分不清是掩码还是输入
+  keyInputEl.type = "text";
+  keyInputEl.value = d.masked || "••••••••••••••••";
+  keyInputEl.readOnly = true;
+  keyInputEl.classList.add("masked");
+  keyInputEl.placeholder = "";
+}
+
+function showKeyStatus(d) {
+  keyConfigured = !!d.configured;
+  keyBtnEl.classList.toggle("configured", keyConfigured);
+  if (keyConfigured) {
+    fillMasked(d);
+    const origin = d.source === "saved" ? "Key 来自界面保存。" : "Key 来自 config.py。";
+    keyHintEl.textContent = origin +
+      "点上面的星号框可填入新 Key 覆盖原来的；只有点「保存」才生效。";
+  } else {
+    keyStateEl.textContent = "还没有配置 API Key";
+    keyInputEl.type = "password";
+    keyHintEl.textContent = "填入以 sk- 开头的 Key，点「保存」后立即生效，无需重启服务。";
+  }
+}
+
+async function openKeyPanel() {
+  keyOverlayEl.classList.remove("hidden");
+  resetKeyForm();
+  keyStateEl.textContent = "正在读取配置…";
+  keyHintEl.textContent = "";
+  keyInputEl.disabled = true;
+  try {
+    const res = await fetch("/api/key", { cache: "no-store" });
+    const d = await res.json();
+    keyInputEl.disabled = false;
+    showKeyStatus(d);
+  } catch (e) {
+    keyInputEl.disabled = false;
+    keyStateEl.textContent = "读取失败：确认后端服务在运行";
+    keyErrEl.textContent = String(e);
+  }
+}
+
+function closeKeyPanel() {
+  // 取消 = 什么也不做：不发请求、不写状态、不碰 config，改动全部丢弃
+  keyOverlayEl.classList.add("hidden");
+  resetKeyForm();
+}
+
+// 点击「已配置」的星号框 → 变成可编辑的空框，准备覆盖
+keyInputEl.addEventListener("click", function () {
+  if (keyConfigured && !keyEdited) {
+    keyEdited = true;
+    keyInputEl.type = "password";
+    keyInputEl.value = "";
+    keyInputEl.readOnly = false;
+    keyInputEl.classList.remove("masked");
+    keyInputEl.placeholder = "输入新的 API Key（保存后覆盖原来的）";
+    keyInputEl.focus();
+    keyErrEl.textContent = "";
+  }
+});
+
+keyInputEl.addEventListener("input", function () {
+  keyEdited = true;
+  keySaveBtnEl.disabled = !keyInputEl.value.trim();
+  keyErrEl.textContent = "";
+});
+
+keySaveBtnEl.addEventListener("click", async function () {
+  const newKey = keyInputEl.value.trim();
+  if (!keyEdited || !newKey) return;   // 还是星号 / 空框，不许提交
+
+  keySaveBtnEl.disabled = true;
+  keySaveBtnEl.textContent = "保存中…";
+  keyErrEl.textContent = "";
+  try {
+    const res = await fetch("/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: newKey }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || "保存失败");
+    // 保存成功：界面回到「已配置 + 星号」，明文不留在输入框里
+    fillMasked(d);
+    keyHintEl.textContent = "已保存并立即生效，无需重启服务。点星号框可再次覆盖。";
+  } catch (e) {
+    keySaveBtnEl.disabled = false;
+    keySaveBtnEl.textContent = "保存";
+    keyErrEl.textContent = "保存失败：" + e.message;
+  }
+});
+
+keyBtnEl.addEventListener("click", openKeyPanel);
+keyCancelBtnEl.addEventListener("click", closeKeyPanel);
+keyCloseEl.addEventListener("click", closeKeyPanel);
+keyOverlayEl.addEventListener("click", function (e) {
+  if (e.target === keyOverlayEl) closeKeyPanel();
+});
+
+// 首屏只刷一下左下角按钮的视觉，不打开弹窗、不拖慢渲染
+async function refreshKeyBadge() {
+  try {
+    const res = await fetch("/api/key", { cache: "no-store" });
+    const d = await res.json();
+    keyBtnEl.classList.toggle("configured", !!d.configured);
+    keyBtnEl.title = d.configured
+      ? "已配置 API Key（点开可查看状态或覆盖）"
+      : "配置大模型 API Key（保存后立即生效）";
+  } catch (e) { /* 后端没起来就算了，按钮保持默认 */ }
+}
+
+// ============================================================
 // 七、启动：页面打开时，先读状态，再画出界面
 // ============================================================
 async function init() {
+  refreshKeyBadge();   // 不 await，别拖慢首屏
   // 1. 从后端读取状态
   //    （后端是"回放事件日志"推导出来的，对前端来说和以前一模一样，无感）
   try {
@@ -2379,7 +2673,11 @@ traceOverlayEl.addEventListener("click", function (e) {
   if (e.target === traceOverlayEl) closeTracePanel();
 });
 document.addEventListener("keydown", function (e) {
-  if (e.key === "Escape" && !traceOverlayEl.classList.contains("hidden")) {
+  if (e.key !== "Escape") return;
+  // 两个弹层都在时先关上面那层（Key 的 z-index 更高）
+  if (!keyOverlayEl.classList.contains("hidden")) {
+    closeKeyPanel();
+  } else if (!traceOverlayEl.classList.contains("hidden")) {
     closeTracePanel();
   }
 });
@@ -2399,27 +2697,21 @@ function syncFullAccess() {
   fullAccessTextEl.textContent = on ? "完整权限：开" : "完整权限";
 }
 
-fullAccessChkEl.addEventListener("change", () => {
+// ★ 这里原本用 confirm() 做二次确认，是「点击无反馈」的元凶：
+//   嵌入式浏览器 / 预览面板会把模态弹窗静默取消（直接返回 false），
+//   于是每次勾上都被立刻弹回，看起来就是点了没反应。
+//   改成点一下直接切换，靠红色胶囊 + 「完整权限：开」给出明确反馈，
+//   风险说明放在 label 的 title 里，不再拦路。
+// ★ 事件绑在 label 上并 preventDefault()：自己接管状态，不让浏览器再
+//   toggle 一次 checkbox；syncFullAccess() 是唯一的权威渲染出口。
+fullAccessTagEl.addEventListener("click", function (e) {
+  e.preventDefault();
   const conv = currentConv();
   if (!conv) {
-    fullAccessChkEl.checked = false;
+    syncFullAccess();
     return;
   }
-
-  if (fullAccessChkEl.checked) {
-    const ok = confirm(
-      "打开「完整权限」后，agent 可以读写工作区以外的文件。\n\n" +
-      "· 仍会拒绝盘符根目录、系统目录这类位置\n" +
-      "· 只对当前会话生效，刷新页面会自动关回去\n\n" +
-      "确定打开吗？"
-    );
-    if (!ok) {
-      fullAccessChkEl.checked = false;
-      return;
-    }
-  }
-
-  conv.fullAccess = fullAccessChkEl.checked;
+  conv.fullAccess = !conv.fullAccess;
   syncFullAccess();
 });
 document.querySelectorAll("#workspaceMenu button").forEach(function (menuBtn) {
