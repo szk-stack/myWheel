@@ -22,15 +22,35 @@
 —— **Docker Desktop 引擎没启动**。双击打开它，等托盘图标稳定，然后：
 
 ```sh
+# ① 先进入项目文件夹：后面 docker build . 里的那个点，指的就是「你现在所在的文件夹」
 cd D:/project/朴素agent
+
+# ② 照 Dockerfile 做一遍，产出一个镜像
+#    -t mywheel:dev  给镜像起名字（mywheel）和标签（dev）；冒号后面是标签，不是端口
+#    .               构建上下文 = 当前文件夹，COPY . . 就是从这里搬文件
 docker build -t mywheel:dev .
+
+# ③ 把镜像跑起来，得到一个容器
+#    -d              后台运行，不占着终端（不加的话终端会被日志占住）
+#    --name mywheel  给容器起名，后面的 logs / rm 就能用名字指它
+#    -p 8000:8000   左边 = 你电脑的端口，右边 = 容器里的端口；这一句才让浏览器连得上
+#    \               续行符：下面那行还属于这条命令，两行其实是一条
 docker run -d --name mywheel -p 8000:8000 \
   -e MYWHEEL_API_KEY=sk-你的Key mywheel:dev
-# 打开 http://localhost:8000 聊一句
+#    -e ...          启动时塞一个环境变量；API Key 靠它传进去，不写进镜像
+#    sk-你的Key      换成你真实的 Key，不换的话页面能开、一对话就报错
+#    mywheel:dev     最后这个是「用哪个镜像来跑」，就是 ② 做出来的那个
+
+# ④ 去浏览器打开 http://localhost:8000 聊一句（# 开头是注释，不会执行）
+#    这里的 8000 就是 -p 左边那个端口
+
+# ⑤ 看容器里打印的启动日志和报错；页面打不开时先查这里
 docker logs mywheel
 ```
 
 这一阶段**先不挂数据卷**，少引入一个变量。`build` 输出里的 `[1/8]`…`[8/8]` 就是 Dockerfile 的行号；第一次要下载底座和依赖，慢是正常的。
+
+第二次跑 `docker run` 之前要先 `docker rm -f mywheel`，否则会报「名字 mywheel 已被占用」——同一个名字只能有一个容器。
 
 ## 阶段之间的门槛
 
