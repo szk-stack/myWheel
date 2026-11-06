@@ -9,17 +9,20 @@
 | 阶段 | 做什么 | 做完的标志 | 状态 |
 | --- | --- | --- | --- |
 | 0 代码侧就绪 | `envconfig` / 数据目录 / `HOST` / `requirements.txt` / `.dockerignore` / `Dockerfile` | 81/81 测试通过、模拟无 `config.py` 启动返回 HTTP 200、代码已 push | ✅ 完成 |
-| 1 本机跑通 | 启动 Docker Desktop → `docker build` → `docker run` → 打开 8000 | 浏览器能对话、`docker logs` 有启动输出 | ⬅ **当前** |
-| 2 数据卷验收 | 加 `-v` 重跑 → 删容器 → 再起一次 | 会话记录还在 | 待做 |
+| 1 本机跑通 | 启动 Docker Desktop → `docker build` → `docker run` → 打开 8000 | 浏览器能对话 | ✅ 完成 2026-11-06 |
+| 2 数据卷验收 | 建卷 → 删容器 → 带卷重起 → 再删再起 | 删容器重跑后会话还在 | ⬅ **当前** |
 | 3 搬上服务器 | 装 Docker → `git clone` → build → run | 服务器 `IP:8000` 能对话 | 待做 |
 | 4 deploy.sh 半自动 | 一个脚本串起拉代码 / 构建 / 停旧 / 起新 | SSH 上去敲一次就更新完 | 待做 |
 | 5 Actions 全自动 | push `main` → 自动构建推镜像 → SSH 重启 | 改完代码几分钟后自动生效 | 待做 |
 
-## 当前卡点（阶段 0 → 1）
+## 阶段 1 命令速查（✅ 已完成）
 
-本机 Docker CLI 28.3.2 已安装，但 `docker info` 报
-`open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`
-—— **Docker Desktop 引擎没启动**。双击打开它，等托盘图标稳定，然后：
+2026-11-06 本机跑通：容器 `mywheel` 运行中、镜像 `mywheel:dev` 265 MB、
+`0.0.0.0:8000->8000/tcp` 映射正常，`/app/data` 里已产生 `data.jsonl` / `traces.jsonl`。
+
+（最初的卡点是 Docker Desktop 引擎没启动：`docker info` 报
+`open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`；
+双击打开、等托盘图标稳定即可。）
 
 ```sh
 # ① 先进入项目文件夹：后面 docker build . 里的那个点，指的就是「你现在所在的文件夹」
@@ -52,10 +55,57 @@ docker logs mywheel
 
 第二次跑 `docker run` 之前要先 `docker rm -f mywheel`，否则会报「名字 mywheel 已被占用」——同一个名字只能有一个容器。
 
+注：本机实测 `docker logs mywheel` 是空的，因为 Python 在容器里默认缓冲输出。想让日志实时可见，给 `docker run` 加一个 `-e PYTHONUNBUFFERED=1` 即可，不影响功能。
+
+## 阶段 2 · 数据卷验收（⬅ 当前）
+
+**要证明的事**：容器可以随手删掉重建，但会话记录不跟着丢。
+
+起点（2026-11-06 实测）：`docker volume ls` 为空，`/app/data/data.jsonl` 1001 B、
+`traces.jsonl` 3915 B —— 这些数据现在写在**容器自己的可写层**里，删容器即消失。
+下面正好拿它当反面例子。
+
+用**命名卷**（由 Docker 保管，独立于容器寿命），不碰 Windows 盘符共享设置：
+
+```sh
+# ① 建一个数据卷：由 Docker 保管的存储空间，寿命和容器无关
+docker volume create mywheel-data
+
+# ② 把当前容器删掉（-f = 先停再删，因为它正在跑）
+#    阶段 1 那个容器没挂卷，里面的 data.jsonl 会一起消失，
+#    刷新网页会连不上 —— 这就是没挂卷的后果
+docker rm -f mywheel
+
+# ③ 用同一个镜像重新起，这次把卷接到 /app/data
+#    -v mywheel-data:/app/data   左边 = 卷名，右边 = 容器里的位置
+#    之后写到 /app/data 的东西，实际都写进卷里
+docker run -d --name mywheel -p 8000:8000 \
+  -v mywheel-data:/app/data \
+  -e MYWHEEL_API_KEY=sk-你的Key mywheel:dev
+
+# ④ 打开 http://localhost:8000 聊一句（会话列表是空的，正常）
+#    然后看数据是否落进卷里，应能看到 data.jsonl / traces.jsonl
+docker exec mywheel ls -l /app/data
+
+# ⑤ 关键一刀：再删一次，把 ③ 的命令原样再敲一遍
+docker rm -f mywheel
+docker run -d --name mywheel -p 8000:8000 \
+  -v mywheel-data:/app/data \
+  -e MYWHEEL_API_KEY=sk-你的Key mywheel:dev
+```
+
+**做完的标志**：刷新 `http://localhost:8000`，第 ④ 步那句对话还在。
+原因：删容器只删那一层薄薄的可写层；卷在容器之外没被删，新容器接上同一个卷就看到了旧数据。
+
+想在资源管理器里直接看到文件，可把 `-v` 左边换成 `D:/mywheel-data`（Linux 用
+`/srv/mywheel/data`），但 Docker Desktop 需要先在 Settings → Resources → File sharing
+把 D 盘加进去，否则会挂载失败或挂成空目录。
+`docker volume rm mywheel-data` 会**真删掉所有会话**，别急着敲。
+
 ## 阶段之间的门槛
 
 - 0 → 1：代码已 push（已完成）
-- 1 → 2：本机页面能正常对话
+- 1 → 2：本机页面能正常对话（已达成）
 - 2 → 3：删容器重跑后会话还在
 - 3 → 4：服务器直接 IP 访问稳定
 - 4 → 5：脚本手动跑过三次没出岔子
@@ -78,16 +128,9 @@ docker logs mywheel
 | `MYWHEEL_API_KEY` | 大模型 Key，**绝不写进镜像** | `docker run -e` |
 | `MYWHEEL_PORT` | 默认 8000 | 需要时 `-e` |
 | `MYWHEEL_ENABLE_VIDEO=false` | 服务器上先关掉视频转写 | `docker run -e` |
+| `PYTHONUNBUFFERED=1` | 让 `docker logs` 能看到实时输出 | 需要时 `docker run -e` |
 
-阶段 2 验收用的命令（Linux 上把 `D:/mywheel-data` 换成 `/srv/mywheel/data`）：
-
-```sh
-docker run -d --name mywheel -p 8000:8000 \
-  -v D:/mywheel-data:/app/data \
-  -e MYWHEEL_API_KEY=sk-你的Key mywheel:dev
-docker exec mywheel ls /app/data      # 应能看到 data.jsonl
-docker rm -f mywheel                  # 删掉容器，再跑一次同样的命令
-```
+阶段 2 的完整步骤见上面「阶段 2 · 数据卷验收」一节，用命名卷，不依赖本机盘符。
 
 ## 明确后置（不做也不挡主线）
 
@@ -103,3 +146,4 @@ docker rm -f mywheel                  # 删掉容器，再跑一次同样的命�
 
 - 本文件在 `docs/` 下，会被 `KNOWLEDGE_SOURCES` 扫进知识库，agent 能直接回答「部署到哪一步了」。
 - 每完成一个阶段，回来把「阶段总览」里的状态改掉。
+- 2026-11-06 阶段 1 实测记录：`docker ps` 显示 `mywheel` Up、`0.0.0.0:8000->8000/tcp`；`docker images` 显示 `mywheel:dev` 265 MB；`docker volume ls` 为空；`docker exec mywheel ls -l /app/data` 有 `data.jsonl` 1001 B、`traces.jsonl` 3915 B。
