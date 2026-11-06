@@ -10,8 +10,8 @@
 | --- | --- | --- | --- |
 | 0 代码侧就绪 | `envconfig` / 数据目录 / `HOST` / `requirements.txt` / `.dockerignore` / `Dockerfile` | 81/81 测试通过、模拟无 `config.py` 启动返回 HTTP 200、代码已 push | ✅ 完成 |
 | 1 本机跑通 | 启动 Docker Desktop → `docker build` → `docker run` → 打开 8000 | 浏览器能对话 | ✅ 完成 2026-11-06 |
-| 2 数据卷验收 | 建卷 → 删容器 → 带卷重起 → 再删再起 | 删容器重跑后会话还在 | ⬅ **当前** |
-| 3 搬上服务器 | 装 Docker → `git clone` → build → run | 服务器 `IP:8000` 能对话 | 待做 |
+| 2 数据卷验收 | 建卷 → 删容器 → 带卷重起 → 再删再起 | 删容器重跑后会话还在 | ✅ 完成 2026-11-06 |
+| 3 搬上 Linux 服务器 | 装 Docker → `git clone` → build → 带卷 run → SSH 隧道验收 | 服务器上能对话、数据落盘、重启后容器自起 | ⬅ **当前** |
 | 4 deploy.sh 半自动 | 一个脚本串起拉代码 / 构建 / 停旧 / 起新 | SSH 上去敲一次就更新完 | 待做 |
 | 5 Actions 全自动 | push `main` → 自动构建推镜像 → SSH 重启 | 改完代码几分钟后自动生效 | 待做 |
 
@@ -57,13 +57,13 @@ docker logs mywheel
 
 注：本机实测 `docker logs mywheel` 是空的，因为 Python 在容器里默认缓冲输出。想让日志实时可见，给 `docker run` 加一个 `-e PYTHONUNBUFFERED=1` 即可，不影响功能。
 
-## 阶段 2 · 数据卷验收（⬅ 当前）
+## 阶段 2 · 数据卷验收（✅ 已完成）
 
 **要证明的事**：容器可以随手删掉重建，但会话记录不跟着丢。
 
 起点（2026-11-06 实测）：`docker volume ls` 为空，`/app/data/data.jsonl` 1001 B、
-`traces.jsonl` 3915 B —— 这些数据现在写在**容器自己的可写层**里，删容器即消失。
-下面正好拿它当反面例子。
+`traces.jsonl` 3915 B —— 这些数据当时写在**容器自己的可写层**里，删容器即消失，
+正好拿它当反面例子。
 
 用**命名卷**（由 Docker 保管，独立于容器寿命），不碰 Windows 盘符共享设置：
 
@@ -97,17 +97,89 @@ docker run -d --name mywheel -p 8000:8000 \
 **做完的标志**：刷新 `http://localhost:8000`，第 ④ 步那句对话还在。
 原因：删容器只删那一层薄薄的可写层；卷在容器之外没被删，新容器接上同一个卷就看到了旧数据。
 
+验收实测：`docker volume ls` 出现 `mywheel-data`；`docker inspect mywheel` 显示
+`volume mywheel-data -> /app/data`；卷内 `data.jsonl` 17295 B、`traces.jsonl` 31990 B
+（比阶段 1 更大，说明删容器重建后新对话继续写进同一个卷）。
+
 想在资源管理器里直接看到文件，可把 `-v` 左边换成 `D:/mywheel-data`（Linux 用
 `/srv/mywheel/data`），但 Docker Desktop 需要先在 Settings → Resources → File sharing
 把 D 盘加进去，否则会挂载失败或挂成空目录。
 `docker volume rm mywheel-data` 会**真删掉所有会话**，别急着敲。
 
+## 阶段 3 · 搬上 Linux 服务器（⬅ 当前）
+
+**要证明的事**：同一份 Dockerfile、同一套命令，换一台全新的 Linux 机器也能跑起来，且数据落在服务器磁盘上。
+
+前提：一台能 SSH 登录的 Linux 服务器。已查过 `szk-stack/myWheel` 是**公开仓库**，
+服务器可匿名 `git clone`，不用配 deploy key；`.dockerignore` 排除了 `config.py`，
+服务器容器里同样走 `config.example.py` 兜底（阶段 0 已验证）。
+
+### 3.1 装 Docker
+
+```sh
+curl -fsSL https://get.docker.com | sh          # 官方一键脚本；也可用发行版包管理器
+sudo usermod -aG docker $USER                   # 重新登录一次后生效，之后不用 sudo
+docker run --rm hello-world                     # 验证引擎能跑
+```
+
+### 3.2 拿代码并构建
+
+```sh
+git clone https://github.com/szk-stack/myWheel.git
+cd myWheel
+docker build -t mywheel:dev .                   # 和本机阶段 1 完全一样
+```
+
+国内服务器若下载底座 / pip 依赖慢，先给 Docker 和 pip 配镜像加速。
+
+### 3.3 建数据目录并启动
+
+```sh
+sudo mkdir -p /srv/mywheel/data
+sudo chown -R $USER:$USER /srv/mywheel          # 方便在宿主机直接查看、备份
+docker run -d --name mywheel --restart unless-stopped \
+  -p 8000:8000 \
+  -v /srv/mywheel/data:/app/data \
+  -e MYWHEEL_API_KEY=sk-你的Key \
+  -e MYWHEEL_ENABLE_VIDEO=false \
+  -e PYTHONUNBUFFERED=1 \
+  mywheel:dev
+```
+
+与本机阶段 2 的三点差别：
+
+- `--restart unless-stopped`：服务器重启或容器崩了会自动拉起（本机不需要）。
+- `-v` 左边用 Linux 绝对路径，不需要 Windows 的 File sharing 设置。
+- `MYWHEEL_ENABLE_VIDEO=false`：Linux 上没有那套 Windows 版 ASR 服务，先关掉视频转写。
+
+### 3.4 验收（不开公网 8000）
+
+服务器上：
+
+```sh
+curl http://127.0.0.1:8000/api/state            # 应返回一段 JSON
+docker logs mywheel                             # 有启动输出（靠 PYTHONUNBUFFERED）
+docker inspect mywheel --format '{{.HostConfig.RestartPolicy.Name}}'   # unless-stopped
+ls -l /srv/mywheel/data                         # 有 data.jsonl / traces.jsonl
+```
+
+本机开一条 SSH 隧道再从浏览器访问（**服务器防火墙 / 安全组不要放行 8000**）：
+
+```sh
+ssh -L 8000:127.0.0.1:8000 用户@服务器IP
+# 保持这个窗口开着，本机浏览器打开 http://localhost:8000
+```
+
+**做完的标志**：隧道里能正常对话；`docker restart mywheel` 之后会话还在；服务器重启后容器自己起来。
+
+阶段 4 的 `deploy.sh` 就是把 3.2 → 3.3 这几条命令串成一个脚本；从阶段 4 起镜像 tag 改用 commit hash（而不是 `dev`），方便回滚。
+
 ## 阶段之间的门槛
 
 - 0 → 1：代码已 push（已完成）
 - 1 → 2：本机页面能正常对话（已达成）
-- 2 → 3：删容器重跑后会话还在
-- 3 → 4：服务器直接 IP 访问稳定
+- 2 → 3：删容器重跑后会话还在（已达成）
+- 3 → 4：服务器上服务稳定、数据落盘、能重复重启
 - 4 → 5：脚本手动跑过三次没出岔子
 
 ## 阶段 0 已完成明细
@@ -130,7 +202,7 @@ docker run -d --name mywheel -p 8000:8000 \
 | `MYWHEEL_ENABLE_VIDEO=false` | 服务器上先关掉视频转写 | `docker run -e` |
 | `PYTHONUNBUFFERED=1` | 让 `docker logs` 能看到实时输出 | 需要时 `docker run -e` |
 
-阶段 2 的完整步骤见上面「阶段 2 · 数据卷验收」一节，用命名卷，不依赖本机盘符。
+阶段 2 / 3 的完整步骤见上面各自的小节。
 
 ## 明确后置（不做也不挡主线）
 
@@ -140,10 +212,12 @@ docker run -d --name mywheel -p 8000:8000 \
 
 ## 安全底线
 
-阶段 3 之前 `8000` 只在本机或内网开。这个服务**没有登录认证**且 `ENABLE_EXEC=True`，直接对公网开放等于把「花你的 API Key + 读写文件 + 执行命令」对外开放。
+阶段 3 用 SSH 隧道访问，服务器防火墙 / 安全组**不要放行 8000**。这个服务**没有登录认证**且 `ENABLE_EXEC=True`，直接对公网开放等于把「花你的 API Key + 读写文件 + 执行命令」对外开放。要公网访问，等阶段 3 稳了先上 Nginx + 认证 + HTTPS（见后置项）。
 
 ## 备注
 
 - 本文件在 `docs/` 下，会被 `KNOWLEDGE_SOURCES` 扫进知识库，agent 能直接回答「部署到哪一步了」。
 - 每完成一个阶段，回来把「阶段总览」里的状态改掉。
-- 2026-11-06 阶段 1 实测记录：`docker ps` 显示 `mywheel` Up、`0.0.0.0:8000->8000/tcp`；`docker images` 显示 `mywheel:dev` 265 MB；`docker volume ls` 为空；`docker exec mywheel ls -l /app/data` 有 `data.jsonl` 1001 B、`traces.jsonl` 3915 B。
+- 2026-11-06 阶段 1 实测：`mywheel` Up、`0.0.0.0:8000->8000/tcp`、`mywheel:dev` 265 MB、`docker volume ls` 为空、`data.jsonl` 1001 B / `traces.jsonl` 3915 B。
+- 2026-11-06 阶段 2 实测：`mywheel-data` 命名卷挂到 `/app/data`、`data.jsonl` 17295 B / `traces.jsonl` 31990 B。
+- 2026-11-06 查证：`szk-stack/myWheel` 为公开仓库（`private: false`），默认分支 `main`，服务器可匿名 clone。
