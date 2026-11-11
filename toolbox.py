@@ -68,19 +68,37 @@ def current_workspace():
     return getattr(_local, "root", None)
 
 
-def set_full_access(enabled):
+def set_full_access(enabled, requested=None):
     """记录"本线程当前对话是否放开工作区限制"（engine 每次对话开始时调用）。
 
     ★ 这是**用户**在前端拨的开关，模型自己没有权力改它：
       模型能看到的只有工具说明书和工具结果，拿不到这个函数。
       所以"agent 能不能跑出工作区"这件事，始终握在用户手里。
+
+    参数 requested：客户端"想要"的开关状态（用于审计）。
+      对外监听时它会被服务端策略强制降级——记录原始意图，
+      才能查清"谁试图要过完整权限"。
     """
     _local.full_access = bool(enabled)
+    _local.full_access_requested = bool(enabled if requested is None else requested)
+    _local.full_access_forced_off = (
+        _local.full_access_requested and not _local.full_access
+    )
 
 
 def full_access():
     """本线程当前是否放开了工作区限制（默认 False）。"""
     return bool(getattr(_local, "full_access", False))
+
+
+def full_access_requested():
+    """客户端原始请求里是否要求过完整权限（审计用）。"""
+    return bool(getattr(_local, "full_access_requested", False))
+
+
+def full_access_forced_off():
+    """客户端要过完整权限、但被服务端策略强制降级（审计用）。"""
+    return bool(getattr(_local, "full_access_forced_off", False))
 
 
 def dangerous_reason(path):
@@ -144,6 +162,60 @@ def prepare_workspace(path):
             raise ValueError(f"目录创建失败：{e}")
 
     return str(p), created
+
+
+# ------------------------------------------------------------
+# 服务端工作区解析（对外入口只认"沙箱里的一个名字"）
+# ------------------------------------------------------------
+# 浏览器传来的 workspace 从"我信任你给的路径"改成"你只能报一个名字"：
+#   "练习1"      → <项目>/sandbox/练习1
+#   绝对路径 / 带 .. / 带分隔符 → 一律拒绝
+# 这样客户端就再也无法把 agent 引到任意目录（比如 C:\Windows）。
+# ------------------------------------------------------------
+
+SANDBOX_ROOT = PROJECT_ROOT / "sandbox"
+
+
+def validate_workspace_name(value):
+    """校验客户端给的工作区名字；合法返回名字字符串，None 原样返回。
+
+    不合规抛 ValueError，消息直接给用户看。
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("工作区必须是名字字符串（如 练习1）")
+
+    name = value.strip()
+    if not name:
+        raise ValueError("工作区名字不能为空")
+    if name in (".", "..") or ".." in name:
+        raise ValueError(f"工作区名字不能包含「..」：{value!r}")
+    if any(ch in name for ch in ("/", "\\", ":")):
+        raise ValueError(f"工作区只能是 sandbox 里的一个名字，不能带路径分隔符：{value!r}")
+    if Path(name).is_absolute() or Path(name).anchor:
+        raise ValueError(f"工作区不能是绝对路径：{value!r}")
+
+    return name
+
+
+def prepare_workspace_name(value):
+    """把"沙箱内的名字"解析成真实目录（不存在就创建）。
+
+    返回 (名字, 绝对路径, 是否新建)；value 为 None/空表示"项目目录"，
+    此时返回 (None, None, False)。
+    """
+    name = validate_workspace_name(value)
+    if name is None:
+        return None, None, False
+
+    abs_path, created = prepare_workspace(name)
+
+    # 兜底：解析结果必须仍在 sandbox/ 下（防将来有人改坏 prepare_workspace）
+    if not Path(abs_path).resolve().is_relative_to(SANDBOX_ROOT.resolve()):
+        raise ValueError("工作区解析结果不在 sandbox 内，已拒绝")
+
+    return name, abs_path, created
 
 
 # ============================================================
