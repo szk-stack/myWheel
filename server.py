@@ -16,14 +16,10 @@ server.py —— 启动入口（用这个文件启动整个项目）
 """
 
 import base64
-import hmac
-import ipaddress
 import json
 import shutil
 import subprocess
-import threading
 import time
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -41,99 +37,6 @@ import tracing
 # 运行时数据一律走 envconfig.data_dir()，别拿它拼数据路径。
 ROOT = Path(__file__).resolve().parent
 
-# 前端用 cookie 携带令牌（登录框输入一次，之后所有请求自动带上，
-# 包括 <img> 这种没法自定义请求头的资源请求）。
-AUTH_COOKIE = "mywheel_token"
-AUTH_COOKIE_MAX_AGE = 30 * 24 * 3600   # 30 天
-
-# 未登录也能访问的 GET 路径：登录页本身 + 静态资源。
-_PUBLIC_GET_PREFIXES = ("/static/",)
-_PUBLIC_GET_PATHS = ("/", "/index.html")
-
-
-def _is_loopback(host):
-    """来源地址是不是本机（127.0.0.1 / ::1）。"""
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return host == "localhost"
-
-
-def _listen_is_external(host=None):
-    """服务是否监听在对外地址上（不是 127.0.0.1 / localhost / ::1）。"""
-    host = (host if host is not None else getattr(config, "HOST", "127.0.0.1")) or ""
-    host = str(host).strip()
-    if host in ("localhost",):
-        return False
-    try:
-        return not ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return True    # 主机名之类的非本机写法，按对外处理（宁严勿松）
-
-
-def resolve_full_access(requested, client_host, listen_host=None):
-    """把「客户端要的完整权限」解析成「服务端真的给的」。
-
-    规则：
-      - 只有本机直连、且不是对外监听，才允许打开；
-      - 对外监听时无论客户端说什么都强制 False。
-    """
-    if not requested:
-        return False
-    if _listen_is_external(listen_host):
-        return False
-    return _is_loopback(str(client_host))
-
-
-class BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    """有上限的多线程服务器：并发满了回 503，不再无限起线程。
-
-    ThreadingHTTPServer 原本每来一个连接就开一条线程；对外暴露时，
-    只要有人不停地连，线程数就能一直涨到把机器拖垮。这里用信号量
-    卡住并发数：拿不到名额的连接立刻收到 503 + Retry-After，然后关闭。
-    """
-
-    daemon_threads = True
-
-    def __init__(self, server_address, handler_class, max_workers=16):
-        self.max_workers = max(1, int(max_workers))
-        self._slots = threading.BoundedSemaphore(self.max_workers)
-        super().__init__(server_address, handler_class)
-
-    def process_request(self, request, client_address):
-        if not self._slots.acquire(blocking=False):
-            body = json.dumps(
-                {"error": "服务繁忙：并发请求已达上限，请稍后重试"},
-                ensure_ascii=False,
-            ).encode("utf-8")
-            try:
-                request.sendall(
-                    b"HTTP/1.1 503 Service Unavailable\r\n"
-                    b"Content-Type: application/json; charset=utf-8\r\n"
-                    b"Retry-After: 2\r\n"
-                    b"Connection: close\r\n"
-                    b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
-                )
-            except OSError:
-                pass
-            finally:
-                self.shutdown_request(request)
-            return
-
-        try:
-            super().process_request(request, client_address)
-        except Exception:
-            # 线程没起来，把名额还回去
-            self._slots.release()
-            raise
-
-    def process_request_thread(self, request, client_address):
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            self._slots.release()
-
-
 
 class ChatHandler(BaseHTTPRequestHandler):
     """HTTP 请求处理器：定义"收到什么请求，回什么内容"。"""
@@ -147,12 +50,6 @@ class ChatHandler(BaseHTTPRequestHandler):
         # 防御：万一有客户端给 GET 带了请求体，先把它读掉——
         # 否则残留字节会污染同一条连接上的下一个请求（经典坑，实测复现过）
         self._drain_body()
-
-        if self.path.split("?")[0] not in _PUBLIC_GET_PATHS and \
-                not self.path.startswith(_PUBLIC_GET_PREFIXES):
-            if not self._authorized():
-                self._send_json(401, {"error": "未授权：请先携带有效访问令牌"})
-                return
 
         if self.path in ("/", "/index.html"):
             # 把网页文件发出去
@@ -218,34 +115,15 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """前端"提交数据"时走这里。"""
-        # ---- 登录接口：唯一允许未授权的 POST（它本身就是来换令牌的）----
-        if self.path == "/api/auth":
-            try:
-                data = self._read_json()
-            except Exception:
-                self._send_json(400, {"error": "请求格式不对：不是合法的 JSON"})
-                return
-            self._handle_auth(data)
-            return
-
-        # 特例：工作区选择接口不需要请求体（它只是"弹个对话框"）。
-        # 本地 GUI 调用不外露：非 127.0.0.1 来源一律 403（先于鉴权判断，
-        # 这样远端无论如何都拿不到这个能力，而不是先看到 401）。
+        # 特例：工作区选择接口不需要请求体（它只是"弹个对话框"），
+        # 所以放在最前面，不经过下面"必须先读 JSON"的关卡
+        # （否则空请求体会被判成 400，对话框就弹不出来了）
         if self.path == "/api/workspace/pick":
+            # ★ 重要：先把它可能携带的请求体读掉，再处理——
+            #   否则这几个字节会残留在连接里、粘到"下一个请求"的前面，
+            #   造成诡异的 501 / 404 / 连接中断（实测复现过的坑！）
             self._drain_body()
-            if not _is_loopback(self.client_address[0]):
-                self._send_json(403, {"error": "选择文件夹只允许本机操作"})
-                return
-            if not self._authorized():
-                self._send_json(401, {"error": "未授权：请先携带有效访问令牌"})
-                return
             self._handle_workspace_pick()
-            return
-
-        # ---- 统一鉴权：所有其他 POST 先验令牌，再读 body ----
-        if not self._authorized():
-            self._drain_body()
-            self._send_json(401, {"error": "未授权：请先携带有效访问令牌"})
             return
 
         # 其余接口都需要 JSON 请求体，先把它读出来
@@ -277,31 +155,10 @@ class ChatHandler(BaseHTTPRequestHandler):
             self._handle_chat_stream(data)
 
         elif self.path == "/api/workspace":
-            # ---- 工作区接口：只接受 sandbox 内的一个名字（如 练习1）----
-            # 绝对路径、带 .. 或分隔符的输入一律拒绝——工作区由服务端解析，
-            # 客户端再也不能把 agent 引到 C:\Windows 这种地方。
+            # ---- 工作区接口：校验一个目录（不存在就创建），供界面设置工作区用 ----
             try:
-                name, abs_path, created = toolbox.prepare_workspace_name(
-                    data.get("path")
-                )
-                self._send_json(200, {
-                    "ok": True,
-                    "path": name,          # 前端存这个名字（刷新后原样回传）
-                    "abs_path": abs_path,  # 只用于展示/调试
-                    "created": created,
-                })
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-            except Exception as e:
-                self._send_json(500, {"error": str(e)})
-
-        elif self.path == "/api/conversations":
-            # ---- 新建会话：由服务端生成 id 并落一条 session 事件 ----
-            # （事件接口不再允许客户端凭空建会话，见 /api/events 的归属校验）
-            try:
-                self._handle_create_conversation(data)
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
+                path, created = toolbox.prepare_workspace(data.get("path", ""))
+                self._send_json(200, {"ok": True, "path": path, "created": created})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
 
@@ -330,160 +187,14 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         elif self.path == "/api/events":
             # ---- 事件接口：把前端发来的一批事件追加到日志末尾 ----
-            # ★ 归属校验：只能操作已存在的会话；整批有一处非法就整批拒绝，
-            #   绝不部分写入（否则日志会变成一半真一半假）。
-            events = data.get("events", [])
-            error = self._validate_events(events)
-            if error:
-                self._send_json(403, {"error": error})
-                return
             try:
-                storage.append_events(events)
+                storage.append_events(data.get("events", []))
                 self._send_json(200, {"ok": True})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
 
         else:
             self.send_error(404, "Not Found")
-
-    # ---------- 鉴权：令牌 / 本机来源 ----------
-
-    def _token_from_request(self):
-        """从 Authorization: Bearer 或 cookie 里取令牌（取到一个就够）。"""
-        auth = self.headers.get("Authorization", "") or ""
-        if auth.lower().startswith("bearer "):
-            return auth[len("bearer "):].strip()
-
-        raw = self.headers.get("Cookie", "") or ""
-        if raw:
-            try:
-                cookies = SimpleCookie(raw)
-            except Exception:
-                return ""
-            morsel = cookies.get(AUTH_COOKIE)
-            if morsel is not None:
-                return morsel.value
-        return ""
-
-    def _authorized(self):
-        """这个请求是否被放行。
-
-        - 配了 AUTH_TOKEN：必须带对（constant-time 比对，防时序侧信道）；
-        - 没配 AUTH_TOKEN：只放行本机来源（127.0.0.1），保持本机零变化。
-        """
-        expected = str(getattr(config, "AUTH_TOKEN", "") or "")
-        if not expected:
-            return _is_loopback(self.client_address[0])
-
-        supplied = self._token_from_request()
-        if not supplied:
-            return False
-        return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
-
-    def _handle_auth(self, data):
-        """登录：校验令牌，成功则种一个 HttpOnly cookie（前端后续请求自动携带）。"""
-        expected = str(getattr(config, "AUTH_TOKEN", "") or "")
-        if not expected:
-            # 本机模式没有令牌可验——直接告诉前端不用登录
-            self._send_json(200, {"ok": True, "auth_required": False})
-            return
-
-        supplied = str(data.get("token", "") or "")
-        if not supplied or not hmac.compare_digest(
-            supplied.encode("utf-8"), expected.encode("utf-8")
-        ):
-            self._send_json(401, {"error": "令牌不正确"})
-            return
-
-        cookie = (
-            f"{AUTH_COOKIE}={supplied}; Path=/; HttpOnly; SameSite=Strict; "
-            f"Max-Age={AUTH_COOKIE_MAX_AGE}"
-        )
-        self._send_json(
-            200,
-            {"ok": True, "auth_required": True},
-            headers={"Set-Cookie": cookie},
-        )
-
-    # ---------- 事件归属校验 ----------
-
-    def _validate_events(self, events):
-        """校验一批事件；合法返回 None，不合法返回给用户看的原因。
-
-        ★ 单租户不等于"谁都能写"：事件只能引用已存在的会话。
-          新建会话必须走 /api/conversations（服务端生成 id），
-          所以这里禁止任何 session 事件——凭空造会话一律 403。
-        """
-        if not isinstance(events, list) or not events:
-            return "events 必须是非空数组"
-
-        try:
-            state = storage.load_state()
-        except Exception as e:
-            return f"读取会话状态失败：{e}"
-        existing = {c["id"] for c in state.get("conversations", [])}
-
-        for ev in events:
-            if not isinstance(ev, dict):
-                return "每个事件都必须是对象"
-            etype = ev.get("type")
-
-            if etype == "session":
-                return "不允许通过事件接口新建会话，请使用 /api/conversations"
-
-            if etype in ("message", "tool", "workspace", "compact"):
-                ref = ev.get("conversation_id")
-                if ref not in existing:
-                    return f"事件引用了不存在的会话：{ref!r}"
-                # 工作区事件也不能夹带任意路径（否则等于绕过 /api/workspace）
-                if etype == "workspace":
-                    try:
-                        toolbox.validate_workspace_name(ev.get("path"))
-                    except ValueError as e:
-                        return f"工作区事件不合法：{e}"
-            elif etype in ("delete", "rename", "switch"):
-                ref = ev.get("id")
-                if ref not in existing:
-                    return f"事件引用了不存在的会话：{ref!r}"
-            else:
-                return f"未知事件类型：{etype!r}"
-
-        return None
-
-    def _handle_create_conversation(self, data):
-        """服务端新建会话：生成 id，写 session（+ 可选 workspace + switch）。"""
-        title = str(data.get("title") or "新对话")[:200]
-        workspace_name, workspace_abs, created = toolbox.prepare_workspace_name(
-            data.get("workspace")
-        )
-
-        conv_id = f"c{time.time_ns()}"
-        events = [{"type": "session", "id": conv_id, "title": title}]
-
-        # 保留分叉的血缘备注（回放时会忽略，旧代码天然兼容）
-        if data.get("branched_from"):
-            events[0]["branched_from"] = str(data["branched_from"])
-            if data.get("branched_at") is not None:
-                events[0]["branched_at"] = data["branched_at"]
-
-        if workspace_name is not None:
-            # 事件里存"名字"（服务端下次按名字重新解析）；前端也存这个名字
-            events.append({
-                "type": "workspace",
-                "conversation_id": conv_id,
-                "path": workspace_name,
-            })
-        events.append({"type": "switch", "id": conv_id})
-
-        storage.append_events(events)
-        self._send_json(200, {
-            "ok": True,
-            "id": conv_id,
-            "title": title,
-            "workspace": workspace_name,
-            "abs_path": workspace_abs,
-            "created": created,
-        })
 
     # ---------- 工作区选择：弹出系统"选择文件夹"对话框 ----------
 
@@ -533,20 +244,7 @@ class ChatHandler(BaseHTTPRequestHandler):
             detail = (completed.stderr or "").strip()[:200]
             self._send_json(200, {"ok": False, "error": f"选择框没有返回结果（环境可能不支持图形界面）：{detail}"})
         else:
-            # 只接受 sandbox/ 下的一级目录：前端只拿到"名字"，
-            # 绝对路径从这里开始就不再往后传了。
-            try:
-                picked = Path(out).resolve()
-                rel = picked.relative_to(toolbox.SANDBOX_ROOT.resolve())
-                if len(rel.parts) != 1:
-                    raise ValueError
-            except (ValueError, OSError):
-                self._send_json(200, {
-                    "ok": False,
-                    "error": f"只能选择 sandbox 目录下的子目录：{out}",
-                })
-                return
-            self._send_json(200, {"ok": True, "path": rel.parts[0]})
+            self._send_json(200, {"ok": True, "path": out})
 
     # ---------- 流式聊天的三个小工具（打字机效果） ----------
 
@@ -559,25 +257,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         ★ 关于"停止"：浏览器那头一 abort，这条 TCP 连接就断了。
           我们下一次往它写数据时会抛 ConnectionError，于是跳出循环，
           在 finally 里显式 close() 生成器——引擎随即被"掐断"。
-
-        ★ 工作区与完整权限都在这里先过服务端策略，再交给引擎：
-          - workspace 只接受 sandbox 内的名字；
-          - 请求体里的 full_access 只是"申请"，对外监听时服务端强制 False。
         """
-        # 先做参数校验——校验失败还能回一个正常的 JSON 错误（SSE 头还没发出去）
-        try:
-            workspace_name, workspace_path, _ = toolbox.prepare_workspace_name(
-                data.get("workspace")
-            )
-        except ValueError as e:
-            self._send_json(400, {"error": f"工作区参数不合法：{e}"})
-            return
-
-        requested_full_access = bool(data.get("full_access"))
-        effective_full_access = resolve_full_access(
-            requested_full_access, self.client_address[0]
-        )
-
         try:
             self._start_sse()
         except Exception:
@@ -588,13 +268,13 @@ class ChatHandler(BaseHTTPRequestHandler):
             # 边收边发：engine.chat_stream 是生成器，它吐出的本来就是
             # "事件字典"（文字增量 / 工具调用 / 工具结果），原样转发给浏览器，
             # 前端按里面的 type 字段分别处理
+            # 注意：把前端传来的"工作区"一并交给引擎（None = 默认项目目录）
             stream = engine.chat_stream(
                 data.get("messages", []),
-                workspace=workspace_path,   # 服务端解析出的绝对路径（None = 项目目录）
+                workspace=data.get("workspace"),
                 compaction=data.get("compaction"),   # 压缩状态（compact 插件要用）
                 conversation_id=data.get("conversation_id"),   # 链路日志用（哪个会话）
-                full_access=effective_full_access,             # 服务端策略（不是客户端原话）
-                full_access_requested=requested_full_access,   # 原始意图（审计用）
+                full_access=bool(data.get("full_access")),     # 用户拨的「完整权限」开关
             )
             for event in stream:
                 self._send_sse(event)
@@ -807,14 +487,12 @@ class ChatHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8")
         return json.loads(body)
 
-    def _send_json(self, status, obj, headers=None):
+    def _send_json(self, status, obj):
         """小工具：把一个字典转成 JSON 发出去。"""
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        for key, value in (headers or {}).items():
-            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -841,32 +519,10 @@ def main():
     #    ThreadingHTTPServer 给每个连接分配一个线程，这个问题就不存在了。
     #    默认 127.0.0.1 = 只有本机能访问（安全）；容器里用 MYWHEEL_HOST=0.0.0.0
     #    覆盖，否则容器内的 127.0.0.1 指容器自己，外面连不上。
-    #
-    #    ★ 对外监听 = 不可信：没有 AUTH_TOKEN 就拒绝启动。
-    #      否则等于把整个项目（文件、命令、Key）无保护地挂到网上。
     host = getattr(config, "HOST", "127.0.0.1")
-    auth_token = str(getattr(config, "AUTH_TOKEN", "") or "").strip()
-
-    if _listen_is_external(host) and not auth_token:
-        print("=" * 60)
-        print("拒绝启动：正在监听对外地址，但没有设置访问令牌。")
-        print(f"  当前监听地址：{host}:{config.PORT}")
-        print("  这样任何人都能直接读写你的文件和执行命令。")
-        print("")
-        print("请二选一：")
-        print("  1) 设置令牌：export MYWHEEL_AUTH_TOKEN='一段足够长的随机字符串'")
-        print("  2) 只听本机：export MYWHEEL_HOST=127.0.0.1")
-        print("=" * 60)
-        return
-
     address = (host, config.PORT)
     try:
-        max_workers = int(getattr(config, "MAX_CONCURRENCY", 16) or 16)
-    except (TypeError, ValueError):
-        print("启动失败：MAX_CONCURRENCY 必须是正整数。")
-        return
-    try:
-        server = BoundedThreadingHTTPServer(address, ChatHandler, max_workers=max_workers)
+        server = ThreadingHTTPServer(address, ChatHandler)
     except OSError:
         print(f"启动失败：端口 {config.PORT} 被占用了！")
         print("解决办法：设置 MYWHEEL_PORT=8001，或改 config.py 里的 PORT。")
@@ -875,11 +531,6 @@ def main():
     print("=" * 52)
     print("服务已启动！请用浏览器打开：")
     print(f"    http://{host}:{config.PORT}")
-    print(f"并发上限：{max_workers}（超限回 503）")
-    if auth_token:
-        print("访问令牌：已启用（浏览器首次打开会提示输入）")
-    else:
-        print("访问令牌：未设置（只允许本机 127.0.0.1 访问）")
     print("（在这个终端按 Ctrl+C 可以停止服务）")
     print("=" * 52)
 

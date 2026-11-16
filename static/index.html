@@ -1410,9 +1410,7 @@ function timestampWorkspaceName() {
   const inUse = function (name) {
     return state.conversations.some(function (c) {
       const w = c.workspace || "";
-      // 新数据存的是名字；老数据可能还是绝对路径，两种都认
-      const tail = w.replace(/\\/g, "/").split("/").pop();
-      return tail === name;
+      return w.endsWith("sandbox\\" + name) || w.endsWith("sandbox/" + name);
     });
   };
   let name = base;
@@ -1422,38 +1420,40 @@ function timestampWorkspaceName() {
 }
 
 // 【新建】造一个新会话，插到列表最前面，然后切过去
-// ★ 会话由服务端创建（/api/conversations）：事件接口不再允许客户端
-//   凭空写 session 事件，服务端生成 id 后我们再拿到本地用。
 async function createConversation() {
-  let data;
-  try {
-    const res = await fetch("/api/conversations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: "新对话",
-        workspace: timestampWorkspaceName(),
-      }),
-    });
-    data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ("HTTP " + res.status));
-  } catch (err) {
-    console.warn("新建会话失败（后端没启动？）：", err);
-    errorText = "新建会话失败：" + err.message;
-    renderAll();
-    return;
-  }
-
   const conv = {
-    id: data.id,
-    title: data.title || "新对话",
+    id: "c" + Date.now(),    // 用当前时间戳当 id：简单，而且基本不可能重复
+    title: "新对话",
     messages: [],
-    workspace: data.workspace || null,   // sandbox 内的名字（如 2026-10-16-20-56）
   };
   state.conversations.unshift(conv);   // unshift：插到数组最前面
   state.current_id = conv.id;
 
-  // session / workspace / switch 已由服务端一次写好，这里不用再补事件
+  // 记忆方式：把"新建 + 默认工作区 + 切换"记成事件，追加到日志
+  const events = [{ type: "session", id: conv.id, title: conv.title }];
+
+  // ★ 给新对话自动分配"默认工作区"：sandbox/<时间戳>（如 sandbox/2026-10-16-20-56）
+  //   这样每个任务默认就有自己的独立沙箱、不会直接动项目文件；
+  //   想让 agent 直接在项目里干活，用工作区菜单切"项目目录"。
+  //   （分配失败——比如后端没启动——就降级：该对话按"项目目录"处理）
+  try {
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: timestampWorkspaceName() }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      conv.workspace = data.path;
+      events.push({ type: "workspace", conversation_id: conv.id, path: data.path });
+    }
+  } catch (err) {
+    console.warn("默认工作区分配失败（后端没启动？）：", err);
+  }
+  events.push({ type: "switch", id: conv.id });
+
+  await appendEvents(events);
+
   renderAll();
   input.focus();           // 光标自动跳到输入框，马上能打字
 }
@@ -1556,9 +1556,9 @@ async function manualWorkspace() {
   if (!conv) return;
 
   const inputValue = prompt(
-    "手动输入工作区名字（agent 只能在这里面干活）：\n" +
-    "· 输入一个名字（如 练习1），会在 sandbox/练习1 建新目录\n" +
-    "· 只能填名字：绝对路径和 .. 会被服务端拒绝\n" +
+    "手动输入工作区路径（agent 只能在这里面干活）：\n" +
+    "· 输入一个目录路径（不存在会自动创建，连父目录一起建）\n" +
+    "· 新建沙箱：输入一个名字（如 练习1），会在 sandbox/练习1 建新目录\n" +
     "· 留空 = 使用项目目录",
     conv.workspace || ""
   );
@@ -1676,41 +1676,30 @@ async function forkConversation(sourceId, keepCount, titleSuffix) {
   if (!source) return;
 
   const copied = source.messages.slice(0, keepCount);
-  const title = source.title + titleSuffix;
-  const workspace = workspaceRequestName(source.workspace);
-
-  // ★ 会话（含工作区、血缘备注）由服务端创建；消息再作为普通事件追加
-  let created;
-  try {
-    const res = await fetch("/api/conversations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: title,
-        workspace: workspace,
-        branched_from: sourceId,
-        branched_at: keepCount - 1,
-      }),
-    });
-    created = await res.json();
-    if (!res.ok || !created.ok) throw new Error(created.error || ("HTTP " + res.status));
-  } catch (err) {
-    alert("分叉失败：" + err.message);
-    return;
-  }
 
   const newConv = {
-    id: created.id,
-    title: created.title || title,
+    id: "c" + Date.now(),
+    title: source.title + titleSuffix,
     messages: copied.map(function (m) {
       return Object.assign({}, m);   // 浅拷贝：tool 条目的字段也原样带上
     }),
-    workspace: created.workspace || null,
+    workspace: source.workspace || null,
   };
   state.conversations.unshift(newConv);
   state.current_id = newConv.id;
 
-  const events = [];
+  const events = [
+    {
+      type: "session",
+      id: newConv.id,
+      title: newConv.title,
+      branched_from: sourceId,        // 血缘备注（回放时忽略，旧代码天然兼容）
+      branched_at: keepCount - 1,
+    },
+  ];
+  if (newConv.workspace) {
+    events.push({ type: "workspace", conversation_id: newConv.id, path: newConv.workspace });
+  }
   copied.forEach(function (m) {
     if (m.role === "tool") {
       events.push({
@@ -1953,7 +1942,7 @@ async function sendMessage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: fullHistory,
-        workspace: workspaceRequestName(conv.workspace),
+        workspace: conv.workspace || null,
         full_access: !!conv.fullAccess,        // 输入框旁那个「完整权限」开关
         compaction: conv.compaction || null,   // 当前压缩状态（后端据此"应用"压缩）
         conversation_id: conv.id,              // 链路日志用（标记这次任务是哪个会话的）
@@ -2257,21 +2246,6 @@ function updateContextMeter() {
 function shortenPath(p) {
   if (p.length <= 32) return p;
   return "…" + p.slice(-28);
-}
-
-// 把会话里存的工作区转成"服务端只认的名字"：
-//   新数据本来就是一个名字（如 练习1）；
-//   老数据是绝对路径（.../sandbox/练习1），取最后一段；
-//   对不上 sandbox 的老路径 → null（退回项目目录，并由服务端记录策略）。
-function workspaceRequestName(ws) {
-  if (!ws) return null;
-  const s = String(ws).replace(/\\/g, "/");
-  const parts = s.split("/").filter(Boolean);
-  if (parts.length === 1) return parts[0];
-  if (parts.length >= 2 && parts[parts.length - 2] === "sandbox") {
-    return parts[parts.length - 1];
-  }
-  return null;
 }
 
 // ---------- 渲染右侧的消息区 ----------
@@ -2583,9 +2557,7 @@ function buildTraceItem(t) {
   }
   head.appendChild(el("span",
     "trace-badge" + (t.status === "error" ? " err" : ""),
-    t.status === "error" ? "出错"
-      : (t.status === "interrupted" ? "中断"
-      : (t.status === "budget" ? "预算中断" : "完成"))));
+    t.status === "error" ? "出错" : (t.status === "interrupted" ? "中断" : "完成")));
   if (t.source === "subagent") head.appendChild(el("span", "trace-badge sub", "子代理"));
   item.appendChild(head);
   item.addEventListener("click", function () { showTraceDetail(t.id); });
@@ -3083,41 +3055,7 @@ function buildCachePanel(data) {
 // ============================================================
 // 七、启动：页面打开时，先读状态，再画出界面
 // ============================================================
-
-// 服务端开了访问令牌时：先输一次，换一个 HttpOnly cookie（后续请求自动带上）。
-// 本机模式（没配令牌）不会触发，行为与以前完全一致。
-async function ensureAuth() {
-  let res;
-  try {
-    res = await fetch("/api/state", { cache: "no-store" });
-  } catch (err) {
-    return true;   // 后端没启动：交给后面的逻辑报错，别卡在登录框
-  }
-  if (res.status !== 401) return true;
-
-  const token = prompt("服务端已开启访问令牌，请输入 MYWHEEL_AUTH_TOKEN：");
-  if (!token) return false;
-
-  const authRes = await fetch("/api/auth", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: token.trim() }),
-  });
-  if (!authRes.ok) {
-    alert("令牌不正确，请重试");
-    return false;
-  }
-  return true;
-}
-
 async function init() {
-  // 0. 需要令牌时先登录（成功后 cookie 自动生效）
-  if (!(await ensureAuth())) {
-    errorText = "未通过访问令牌校验，请刷新页面重新输入。";
-    renderAll();
-    return;
-  }
-
   refreshKeyBadge();   // 不 await，别拖慢首屏
   // 1. 从后端读取状态
   //    （后端是"回放事件日志"推导出来的，对前端来说和以前一模一样，无感）

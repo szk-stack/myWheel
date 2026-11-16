@@ -25,41 +25,6 @@ import llm
 import toolbox
 import tracing
 
-# 单次请求的三重硬预算。配置缺失 / 配成 0 或负数时回落到这里的默认值——
-# 对外暴露的入口必须永远有一道闸，不能靠"忘记配"就变成无限。
-DEFAULT_MAX_TOOL_ROUNDS = 30
-DEFAULT_MAX_TASK_TOKENS = 2_000_000
-DEFAULT_MAX_TASK_SECONDS = 900.0
-
-
-def _budget_limits():
-    """读取本进程的三重预算（缺省/非法值一律回落到安全默认）。"""
-    def _positive(name, fallback):
-        value = getattr(config, name, fallback)
-        try:
-            value = type(fallback)(value)
-        except (TypeError, ValueError):
-            return fallback
-        return value if value > 0 else fallback
-
-    return (
-        _positive("MAX_TOOL_ROUNDS", DEFAULT_MAX_TOOL_ROUNDS),
-        _positive("MAX_TASK_TOKENS", DEFAULT_MAX_TASK_TOKENS),
-        _positive("MAX_TASK_SECONDS", DEFAULT_MAX_TASK_SECONDS),
-    )
-
-
-def _budget_reason(deadline, total_tokens, max_tokens):
-    """返回超预算的原因；没超返回 None。"""
-    if total_tokens >= max_tokens:
-        return (
-            f"本次请求累计 token 已达 {total_tokens:,}，"
-            f"超过上限 {max_tokens:,}，已中断"
-        )
-    if time.time() >= deadline:
-        return "本次请求已超过总时长上限，已中断"
-    return None
-
 
 def chat(messages):
     """处理一次对话，返回 AI 的回答。"""
@@ -214,21 +179,16 @@ def _slim_message(m):
 
 
 def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
-                conversation_id=None, trace_source="main", full_access=False,
-                full_access_requested=None):
+                conversation_id=None, trace_source="main", full_access=False):
     """流式版对话流程（生成器）。
 
     参数 workspace：本次对话的工作区目录（None = 默认项目目录）——
     由用户在前端设定、随请求传进来；注意：模型没有权力改它，
     它只是被锁在工作区里干活的人。
-    ★ 对外入口（server.py）只会传"沙箱内的相对名"解析出来的绝对路径；
-      本函数本身不校验来源，CLI / 子代理可以传任意目录。
 
     参数 full_access：用户在输入框旁拨的「完整权限」开关——
     True 时文件工具可以读写工作区以外的路径（仍会拒绝盘符根目录和系统目录）。
     同样是**用户**的权力，模型改不了。
-    ★ 对外监听时服务端会把它强制降级为 False；full_access_requested
-      记录客户端原始意图，供 before_tool 审计。
 
     参数 compaction：会话的上下文压缩状态（{"summary", "first_kept_index"} 或 None）
     —— 由前端随请求带来，放进 ctx["meta"] 供 compact 插件使用。
@@ -268,12 +228,6 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
 
     text_pieces = []      # 攒完整回答（给 after_llm 和链路日志用）
     used_rounds = 0       # 已经执行过几轮工具
-    total_tokens = 0       # 本次请求累计 token（跨轮累加）
-
-    # ★ 单请求硬预算：轮次 / 累计 token / 总墙钟
-    max_rounds, max_tokens, max_seconds = _budget_limits()
-    deadline = trace_started + max_seconds
-    budget_reason = None   # 撞上哪道闸门（收尾时作为一条事件回给前端）
 
     try:
         # ★ 第 0 步：先把工作区告诉工具箱——接下来所有工具都被锁在它里面干活
@@ -283,8 +237,8 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
         # ★ 失败闸清零：每次对话重新开始记账（上一个话题的失败不该连坐）
         toolbox.reset_fail_streak()
 
-        # ★ 完整权限开关（用户在前端拨的，默认关；对外监听时已被服务端降级）
-        toolbox.set_full_access(full_access, requested=full_access_requested)
+        # ★ 完整权限开关（用户在前端拨的，默认关）
+        toolbox.set_full_access(full_access)
 
         # ★ 第 0.5 步：把"压缩状态"放进数据袋——compact 插件用它来
         #   "应用"已有的压缩（切成"摘要 + 最近消息"）
@@ -311,7 +265,6 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                 "usage": usage,
             })
             trace["usage"] = tracing.merge_usage(trace.get("usage"), usage)
-            total_tokens += usage.get("total_tokens", 0)
 
         # ★ 如果刚才发生了压缩，把这件事告诉前端（记账 + 显示压缩卡片 + 用量回落）
         if ctx["meta"].get("new_compaction"):
@@ -334,11 +287,6 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
 
         # ② agent 循环
         while True:
-            # ★ 每轮开始先验预算：超了就不再调模型（调一次就是真金白银）
-            budget_reason = _budget_reason(deadline, total_tokens, max_tokens)
-            if budget_reason:
-                break
-
             pending_calls = None
             round_started = time.time()
             round_text = ""        # 本轮的文字输出（链路日志用）
@@ -380,27 +328,18 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                 # 本轮用量 + 并进整条链路的账本（一个任务可能有很多轮）
                 round_record["usage"] = round_usage
                 trace["usage"] = tracing.merge_usage(trace.get("usage"), round_usage)
-                total_tokens += round_usage.get("total_tokens", 0)
             trace["rounds"].append(round_record)
 
             if not pending_calls:
                 break    # 模型正常答完了 → 收工
 
-            # ★ 本轮刚回的 usage 可能已经把预算撑爆：那就别再执行工具、
-            #   也别再调下一轮模型了（工具同样可能花时间/改文件）。
-            budget_reason = _budget_reason(deadline, total_tokens, max_tokens)
-            if budget_reason:
-                break
-
-            # 轮次计数：max_rounds 是硬上限（配置为 0/负数时回落到默认值）。
-            # ★ 撞上限不能"静默截断"：下面会 yield 一条 budget_exceeded 事件，
-            #   让前端明确看到为什么停了。
-            if used_rounds >= max_rounds:
-                budget_reason = (
-                    f"工具调用达到上限（{max_rounds} 轮），已停止继续执行。"
-                    "如需更长任务，请调大 MAX_TOOL_ROUNDS。"
-                )
-                print(f"[警告] {budget_reason}")
+            # 轮次计数：MAX_TOOL_ROUNDS 为 0 = 不限制（默认）——让模型自己
+            # 决定什么时候收工，和 Pi / dsh 的做法一致；
+            # 配了正数才当保险丝用（防死循环烧钱）。
+            # ★ 注意：撞上限是"直接截断"，模型没机会说"我没做完"——
+            #   这个行为等闸门方案定了再改（现在默认 0，走不到这里）。
+            if config.MAX_TOOL_ROUNDS > 0 and used_rounds >= config.MAX_TOOL_ROUNDS:
+                print(f"[警告] 工具调用达到上限（{config.MAX_TOOL_ROUNDS} 轮），停止继续执行")
                 break
             used_rounds += 1
 
@@ -494,14 +433,6 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
                         ],
                     })
 
-        # ★ 撞了预算闸门：把原因作为一条事件回前端（不静默截断），
-        #   同时给一段普通文字——老前端不认识新事件也能看见说明。
-        if budget_reason:
-            notice = f"\n\n（任务提前结束：{budget_reason}）"
-            text_pieces.append(notice)
-            yield {"type": "budget_exceeded", "reason": budget_reason}
-            yield {"type": "text", "text": notice}
-
         # ④ 循环结束：把完整回答交给 after_llm（记录类用途，前面解释过）
         ctx["reply"] = "".join(text_pieces)
         try:
@@ -510,11 +441,7 @@ def chat_stream(messages, workspace=None, compaction=None, skip_persona=False,
             # after_llm 插件出错不影响已经发出的内容，打个警告就好
             print(f"[警告] after_llm 插件出错：{e}")
 
-        if budget_reason:
-            trace["status"] = "budget"
-            trace["error"] = budget_reason
-        else:
-            trace["status"] = "ok"
+        trace["status"] = "ok"
         trace["final_text"] = ctx["reply"]
 
     except Exception as e:

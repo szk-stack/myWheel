@@ -61,7 +61,7 @@ def parse_args(argv=None):
     p.add_argument("--full-access", action="store_true",
                    help="允许读写工作区以外的文件（同网页上的开关）")
     p.add_argument("--max-rounds", type=int, default=None,
-                   help="最多执行几轮工具（默认取 config；0 或负数回落默认上限）")
+                   help="最多执行几轮工具（默认取 config，0 = 不限）")
     return p.parse_args(argv)
 
 

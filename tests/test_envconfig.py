@@ -116,8 +116,7 @@ class EnvconfigTest(unittest.TestCase):
     def test_data_paths_move_together_in_a_fresh_process(self):
         """模块级常量在 import 时求值，用全新进程验证写入点确实一起搬家。"""
         code = (
-            "import envconfig; envconfig.apply();"
-            "import storage, tracing, keyring, engine, server;"
+            "import envconfig, storage, tracing, keyring, engine, server;"
             "d = envconfig.data_dir();"
             "assert storage.LOG_FILE.parent == d, storage.LOG_FILE;"
             "assert tracing.TRACE_FILE.parent == d, tracing.TRACE_FILE;"

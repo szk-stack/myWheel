@@ -28,28 +28,15 @@ ROOT = Path(__file__).resolve().parent
 PREFIX = "MYWHEEL_"
 DATA_DIR_ENV = "MYWHEEL_DATA_DIR"
 
-# 老本机 config.py 里没有的新配置项：先补默认值，环境变量才覆盖得到。
-# （config.py 是 gitignore 的，换台机器克隆下来不会带着这批新键，必须在这里补。）
-_DEFAULTS = {
-    "HOST": "127.0.0.1",
-    # 对外监听时的访问令牌。为空 = 只允许本机（127.0.0.1）访问。
-    "AUTH_TOKEN": "",
-    # 单次请求的硬预算（engine.chat_stream 用）
-    "MAX_TOOL_ROUNDS": 30,
-    "MAX_TASK_TOKENS": 2_000_000,
-    "MAX_TASK_SECONDS": 900,
-    # 同时处理的连接数上限（超了回 503，不再起新线程）
-    "MAX_CONCURRENCY": 16,
-}
+# 老本机 config.py 里没有的新配置项：先补默认值，环境变量才覆盖得到
+_DEFAULTS = {"HOST": "127.0.0.1"}
 
 # 只允许覆盖这些名字。类型按 config 里原本的值推断（bool/int/float/str），
 # 不维护第二张类型表；列表类配置（KNOWLEDGE_SOURCES 等）暂不开放注入。
 ALLOWED = frozenset({
     "HOST", "PORT", "API_KEY", "API_URL", "MODEL", "VISION_MODEL",
     "SYSTEM_PROMPT", "SUBAGENT_PROMPT",
-    "AUTH_TOKEN", "MAX_CONCURRENCY",
-    "ENABLE_TOOLS", "MAX_TOOL_ROUNDS", "MAX_TASK_TOKENS", "MAX_TASK_SECONDS",
-    "ENABLE_EXEC",
+    "ENABLE_TOOLS", "MAX_TOOL_ROUNDS", "ENABLE_EXEC",
     "ENABLE_VISION", "MAX_IMAGE_MB",
     "ENABLE_COMPACT", "CONTEXT_WINDOW", "COMPACT_THRESHOLD_RATIO",
     "KEEP_RECENT_MESSAGES", "ENABLE_USAGE_STATS", "ENABLE_SUBAGENT",

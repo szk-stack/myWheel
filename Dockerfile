@@ -2,11 +2,7 @@
 #
 #   docker build -t mywheel:dev .
 #   docker run -d --name mywheel -p 8000:8000 \
-#     -e MYWHEEL_API_KEY=sk-你的Key \
-#     -e MYWHEEL_AUTH_TOKEN=一段足够长的随机字符串 mywheel:dev
-#
-# 注意：镜像默认监听 0.0.0.0（对外），没有 MYWHEEL_AUTH_TOKEN 时
-#       服务会拒绝启动——这是故意的，避免把文件/命令裸奔到网上。
+#     -e MYWHEEL_API_KEY=sk-你的Key mywheel:dev
 #
 # 下面 8 条指令，正好对应「你手动做一遍」的 8 个动作。
 

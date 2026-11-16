@@ -6,7 +6,6 @@ __pycache__/
 data.jsonl
 data.json.bak
 traces.jsonl
-audit.jsonl
 
 # ===== 本地配置（里面有你的 API Key，千万不要提交！）=====
 # 换电脑/新克隆仓库时，请复制 config.example.py 为 config.py 再填 Key

@@ -393,5 +393,25 @@ def main():
     root.mainloop()
 
 
+def _log_crash():
+    """pythonw 没有控制台，异常会消失得无影无踪——界面不出、也没人告诉你为什么。
+
+    所以把 traceback 落到文件里。下次再遇到"双击没反应"，
+    先看项目根目录有没有 launcher_error.log，答案基本都在里面。
+    """
+    import traceback
+    try:
+        (ROOT / "launcher_error.log").write_text(
+            time.strftime("%Y-%m-%d %H:%M:%S\n") + traceback.format_exc(),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        _log_crash()
+        raise
